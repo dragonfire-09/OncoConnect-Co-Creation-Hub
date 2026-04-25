@@ -1191,12 +1191,22 @@ def page_ai_center():
                 if "confidence" in dec_df.columns:
                     fig2 = px.histogram(dec_df, x="confidence", nbins=10,
                                         title="Confidence Distribution")
-                                        st.plotly_chart(fig2, use_container_width=True)
+                    st.plotly_chart(fig2, use_container_width=True)
             with dc3:
                 if "target_section" in dec_df.columns:
                     fig3 = px.histogram(dec_df, x="target_section", title="By Section")
                     fig3.update_layout(showlegend=False)
                     st.plotly_chart(fig3, use_container_width=True)
+
+            sm1, sm2, sm3, sm4 = st.columns(4)
+            sm1.metric("Total Decisions", len(dec_df))
+            if "confidence" in dec_df.columns:
+                sm2.metric("Avg Confidence", f"{dec_df['confidence'].mean():.0%}")
+            if "decision" in dec_df.columns:
+                sm3.metric("Integrated", len(dec_df[dec_df["decision"] == "integrate"]))
+                sm4.metric("Rejected", len(dec_df[dec_df["decision"] == "reject"]))
+        else:
+            st.info("No AI decisions yet.")
 
             # Summary metrics
             st.subheader("Summary")
