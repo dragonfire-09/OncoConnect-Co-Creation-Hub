@@ -1,2 +1,6 @@
-feedback_id,date,source_type,country,organisation,proposal_section,feedback_text,ai_status,integration_status
-F001,2026-04-25,Partner,Turkey,Kanser Savaşçıları Derneği,Needs Analysis,Initial placeholder feedback on patient needs.,Pending,Not Reviewed
+feedback_id,date,partner_country,organisation,section,feedback,priority,status,response
+F1,2025-05-20,Turkey,Kanser Savaşçıları Derneği,Methodology,We should integrate patient stories as qualitative data in WP2 needs assessment,High,Under Review,Will be discussed in next consortium meeting
+F2,2025-05-22,Poland,Fundacja Onkologiczna Rakiety,Work Packages,WP3 should include Polish language NLP considerations for matching,Medium,Open,
+F3,2025-05-25,Spain,Universitat de Barcelona,Impact,Add validated psychosocial outcome measures like EORTC QLQ-C30,High,Accepted,Integrated into WP5 evaluation framework
+F4,2025-05-28,Turkey,Kanser Savaşçıları Derneği,Ethics/Data Protection,KVKK compliance requirements must be mapped alongside GDPR,High,Open,
+F5,2025-06-01,Poland,Fundacja Onkologiczna Rakiety,Dissemination,Suggest adding patient ambassador programme in WP6,Medium,Under Review,
