@@ -1,1 +1,4 @@
-
+partner_id,organisation,country,partner_type,contact_person,email,role,wp_responsibility
+P1,Kanser Savaşçıları Derneği,Turkey,Patient Association,TBD,TBD,Coordinator,WP1;WP4
+P2,Rak'n'Roll Foundation,Poland,Patient NGO,TBD,TBD,Patient engagement and dissemination,WP2;WP5
+P3,Universitat de Barcelona,Spain,University,TBD,TBD,Psychology and methodology partner,WP3
