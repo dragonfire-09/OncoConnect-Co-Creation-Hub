@@ -1,4 +1,4 @@
-partner_id,organisation,country,role,type,contact_person,email,status,description
-P1,Kanser Savaşçıları Derneği,Turkey,Coordinator,NGO,Project Lead,info@kansersavascilari.org,Active,Patient advocacy and community building for cancer patients in Türkiye
-P2,Fundacja Onkologiczna Rakiety,Poland,Partner,Foundation,Foundation Lead,contact@rakiety.org.pl,Active,Empowering patients through psychological support and community initiatives
-P3,Universitat de Barcelona,Spain,Partner,Academic,Research Lead,oncoconnect@ub.edu,Active,Expertise in psychology and behavioral sciences and evidence-based research
+partner_id,organisation,country,role,type,description
+P1,Kanser Savaşçıları Derneği,Turkey,Coordinator,NGO,Leading patient-focused NGO supporting cancer patients and survivors in Türkiye. Responsible for project management and pilot implementation.
+P2,Fundacja Onkologiczna Rakiety,Poland,Partner,Foundation,Cancer support foundation empowering patients through psychological support community initiatives and awareness campaigns.
+P3,Universitat de Barcelona,Spain,Partner,Academic,Renowned academic institution with expertise in psychology behavioral sciences and evidence-based research methodologies.
