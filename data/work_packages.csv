@@ -1,1 +1,6 @@
-
+wp_id,wp_name,lead_partner,supporting_partners,start_month,end_month,status
+WP1,Project Management & Coordination,Turkey,Poland;Spain,1,18,In Progress
+WP2,Patient Needs Assessment & Co-Creation,Poland,Turkey;Spain,2,6,Not Started
+WP3,AI-Based Peer Matching Model Design,Spain,Turkey;Poland,4,10,Not Started
+WP4,Pilot Implementation & Community Testing,Turkey,Poland;Spain,8,15,Not Started
+WP5,Dissemination Impact & Sustainability,Poland,Turkey;Spain,12,18,Not Started
