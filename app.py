@@ -312,40 +312,123 @@ def get_org():
 # ═══════════════════════════════════════════════════
 def render_countdown():
     now = datetime.now()
+
+    # Preparation phase
+    prep_total = (SUBMISSION_DEADLINE - PREPARATION_START).days
+    prep_elapsed = (now - PREPARATION_START).days
+    prep_remaining = max(0, (SUBMISSION_DEADLINE - now).days)
+    prep_progress = max(0.0, min(1.0, prep_elapsed / max(prep_total, 1)))
+
+    # Submission countdown
     rem = SUBMISSION_DEADLINE - now
     if rem.total_seconds() <= 0:
-        st.error("SUBMISSION DEADLINE PASSED!")
+        st.error("⏰ SUBMISSION DEADLINE PASSED!")
         return
+
     days = rem.days
     hours, rem2 = divmod(rem.seconds, 3600)
     minutes, _ = divmod(rem2, 60)
-    total_span = max((SUBMISSION_DEADLINE - datetime(2025, 5, 1)).days, 1)
-    progress = max(0.0, min(1.0, 1 - days / total_span))
+
+    # Color based on urgency
     if days > 365:
-        color = "#28a745"
+        sub_color = "#17a2b8"
     elif days > 180:
-        color = "#17a2b8"
+        sub_color = "#28a745"
     elif days > 60:
-        color = "#ffc107"
+        sub_color = "#ffc107"
     else:
-        color = "#dc3545"
+        sub_color = "#dc3545"
+
+    # Preparation phase color
+    if prep_progress < 0.5:
+        prep_color = "#a855f7"
+    elif prep_progress < 0.8:
+        prep_color = "#f59e0b"
+    else:
+        prep_color = "#ef4444"
 
     st.markdown(
-        f"<div style='background:linear-gradient(135deg,#1a1a2e,#16213e);"
-        f"border-radius:16px;padding:1.5rem;text-align:center;color:white;margin-bottom:1rem;'>"
-        f"<p style='margin:0;font-size:.9rem;opacity:.8;'>"
-        f"SUBMISSION DEADLINE: {SUBMISSION_DEADLINE.strftime('%d %B %Y')}</p>"
-        f"<div style='display:flex;justify-content:center;gap:2rem;margin:1rem 0;'>"
-        f"<div><span style='font-size:2.5rem;font-weight:bold;color:{color};'>{days}</span>"
-        f"<br><span style='font-size:.8rem;opacity:.7;'>DAYS</span></div>"
-        f"<div><span style='font-size:2.5rem;font-weight:bold;color:{color};'>{hours:02d}</span>"
-        f"<br><span style='font-size:.8rem;opacity:.7;'>HOURS</span></div>"
-        f"<div><span style='font-size:2.5rem;font-weight:bold;color:{color};'>{minutes:02d}</span>"
-        f"<br><span style='font-size:.8rem;opacity:.7;'>MIN</span></div>"
-        f"</div></div>",
+        f"""
+        <div style="
+            display:flex; gap:1rem; margin-bottom:1rem;
+        ">
+            <!-- Preparation Phase -->
+            <div style="
+                flex:1;
+                background:linear-gradient(135deg,#1a1a2e,#2d1b4e);
+                border-radius:16px; padding:1.5rem; text-align:center;
+                color:white;
+            ">
+                <p style="margin:0;font-size:.75rem;opacity:.7;letter-spacing:2px;">
+                    🟣 PREPARATION PHASE</p>
+                <p style="margin:.3rem 0 0;font-size:.85rem;opacity:.8;">
+                    Co-creation &amp; proposal development</p>
+                <div style="
+                    margin:1rem auto; width:120px; height:120px;
+                    border-radius:50%;
+                    background:conic-gradient({prep_color} {prep_progress*360}deg, #333 0deg);
+                    display:flex; align-items:center; justify-content:center;
+                ">
+                    <div style="
+                        width:100px; height:100px; border-radius:50%;
+                        background:#1a1a2e; display:flex;
+                        align-items:center; justify-content:center;
+                        flex-direction:column;
+                    ">
+                        <span style="font-size:1.8rem;font-weight:bold;color:{prep_color};">
+                            {int(prep_progress*100)}%</span>
+                        <span style="font-size:.65rem;opacity:.6;">COMPLETE</span>
+                    </div>
+                </div>
+                <p style="margin:0;font-size:.8rem;opacity:.6;">
+                    Started: {PREPARATION_START.strftime('%d %b %Y')} &nbsp;|&nbsp;
+                    Elapsed: {prep_elapsed} days
+                </p>
+            </div>
+
+            <!-- Submission Countdown -->
+            <div style="
+                flex:1;
+                background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);
+                border-radius:16px; padding:1.5rem; text-align:center;
+                color:white;
+            ">
+                <p style="margin:0;font-size:.75rem;opacity:.7;letter-spacing:2px;">
+                    🔵 SUBMISSION DEADLINE</p>
+                <p style="margin:.3rem 0 0;font-size:.85rem;opacity:.8;">
+                    {SUBMISSION_DEADLINE.strftime('%d %B %Y, %H:%M')}</p>
+                <div style="
+                    display:flex; justify-content:center;
+                    gap:1.5rem; margin:1.2rem 0;
+                ">
+                    <div>
+                        <span style="font-size:2.8rem;font-weight:bold;color:{sub_color};">
+                            {days}</span>
+                        <br><span style="font-size:.75rem;opacity:.6;">DAYS</span>
+                    </div>
+                    <div>
+                        <span style="font-size:2.8rem;font-weight:bold;color:{sub_color};">
+                            {hours:02d}</span>
+                        <br><span style="font-size:.75rem;opacity:.6;">HOURS</span>
+                    </div>
+                    <div>
+                        <span style="font-size:2.8rem;font-weight:bold;color:{sub_color};">
+                            {minutes:02d}</span>
+                        <br><span style="font-size:.75rem;opacity:.6;">MIN</span>
+                    </div>
+                </div>
+                <p style="margin:0;font-size:.8rem;opacity:.6;">
+                    Erasmus+ KA210 — Expected Call 2027
+                </p>
+            </div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-    st.progress(progress)
+
+    # Progress bar
+    sub_progress = max(0.0, min(1.0, 1 - days / max(prep_total, 1)))
+    st.progress(sub_progress)
 
 
 def ann_card(row):
