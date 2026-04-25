@@ -1205,8 +1205,7 @@ def page_ai_center():
             if "decision" in dec_df.columns:
                 sm3.metric("Integrated", len(dec_df[dec_df["decision"] == "integrate"]))
                 sm4.metric("Rejected", len(dec_df[dec_df["decision"] == "reject"]))
-        else:
-            st.info("No AI decisions yet.")
+       
 
             # Summary metrics
             st.subheader("Summary")
