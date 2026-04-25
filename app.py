@@ -532,35 +532,266 @@ def page_work_packages(wp_df):
 
 
 def page_gantt(wp_df):
-    st.title("Gantt Chart")
+    st.title("📊 Interactive Gantt Chart — 18 Months")
+
     g = wp_df.copy()
     g["Start"] = g["start_month"].apply(lambda m: PROJECT_START + timedelta(days=(m - 1) * 30))
     g["Finish"] = g["end_month"].apply(lambda m: PROJECT_START + timedelta(days=m * 30))
     g["Task"] = g["wp_id"] + ": " + g["wp_name"]
+    g["Duration (months)"] = g["end_month"] - g["start_month"]
     lc = "lead_country" if "lead_country" in g.columns else "lead_partner"
 
-    fig = px.timeline(g, x_start="Start", x_end="Finish", y="Task", color=lc,
-                       hover_data=["lead_partner", "status"],
-                       color_discrete_map={"Turkey": "#e74c3c", "Poland": "#3498db", "Spain": "#f39c12"})
-    fig.update_yaxes(autorange="reversed")
+    # ── Filters ──
+    st.subheader("🔍 Filters")
+    fc1, fc2, fc3 = st.columns(3)
 
-    # Today line (without annotation_text to avoid plotly bug)
-    today = datetime.now()
-    fig.add_shape(
-        type="line",
-        x0=today, x1=today,
-        y0=0, y1=1,
-        yref="paper",
-        line=dict(color="red", width=2, dash="dash"),
-    )
-    fig.add_annotation(
-        x=today, y=1.05, yref="paper",
-        text="Today", showarrow=False,
-        font=dict(color="red", size=12),
+    with fc1:
+        countries = g[lc].unique().tolist()
+        sel_countries = st.multiselect("Lead Country", countries, default=countries)
+    with fc2:
+        statuses = g["status"].unique().tolist()
+        sel_status = st.multiselect("Status", statuses, default=statuses)
+    with fc3:
+        view_mode = st.radio("View Mode", ["Timeline", "Duration Bars", "Both"], horizontal=True)
+
+    # Apply filters
+    filtered = g[g[lc].isin(sel_countries) & g["status"].isin(sel_status)]
+
+    if filtered.empty:
+        st.warning("No work packages match the selected filters.")
+        return
+
+    # ── Timeline View ──
+    if view_mode in ("Timeline", "Both"):
+        st.subheader("📅 Timeline View")
+
+        # Build hover text
+        filtered["hover"] = filtered.apply(
+            lambda r: (
+                f"<b>{r['wp_id']}: {r['wp_name']}</b><br>"
+                f"Lead: {r['lead_partner']} ({r.get(lc, '')})<br>"
+                f"Duration: M{r['start_month']}–M{r['end_month']} ({r['Duration (months)']} months)<br>"
+                f"Status: {r['status']}<br>"
+                f"Budget: €{r['budget_eur']:,.0f}" if "budget_eur" in r.index else
+                f"<b>{r['wp_id']}: {r['wp_name']}</b><br>"
+                f"Lead: {r['lead_partner']}<br>"
+                f"M{r['start_month']}–M{r['end_month']}"
+            ),
+            axis=1,
+        )
+
+        fig = px.timeline(
+            filtered,
+            x_start="Start",
+            x_end="Finish",
+            y="Task",
+            color=lc,
+            hover_data={
+                "lead_partner": True,
+                "status": True,
+                "Duration (months)": True,
+                "Start": False,
+                "Finish": False,
+                "Task": False,
+                lc: False,
+            },
+            color_discrete_map={
+                "Turkey": "#e74c3c",
+                "Poland": "#3498db",
+                "Spain": "#f39c12",
+            },
+        )
+
+        fig.update_yaxes(autorange="reversed")
+
+        # Today marker
+        today = datetime.now()
+        fig.add_shape(
+            type="line",
+            x0=today, x1=today, y0=0, y1=1,
+            yref="paper",
+            line=dict(color="red", width=2, dash="dash"),
+        )
+        fig.add_annotation(
+            x=today, y=1.06, yref="paper",
+            text=f"📍 Today ({today.strftime('%d %b %Y')})",
+            showarrow=False,
+            font=dict(color="red", size=11, family="Arial Black"),
+        )
+
+        # Project milestones
+        milestones = [
+            {"month": 1, "label": "Kickoff", "color": "#28a745"},
+            {"month": 6, "label": "Needs Report", "color": "#17a2b8"},
+            {"month": 10, "label": "Matching Protocol", "color": "#f39c12"},
+            {"month": 15, "label": "Pilot Complete", "color": "#e74c3c"},
+            {"month": 18, "label": "Final Report", "color": "#6f42c1"},
+        ]
+
+        for ms in milestones:
+            ms_date = PROJECT_START + timedelta(days=(ms["month"] - 1) * 30)
+            fig.add_shape(
+                type="line",
+                x0=ms_date, x1=ms_date, y0=0, y1=1,
+                yref="paper",
+                line=dict(color=ms["color"], width=1, dash="dot"),
+            )
+            fig.add_annotation(
+                x=ms_date, y=-0.08, yref="paper",
+                text=f"M{ms['month']}: {ms['label']}",
+                showarrow=False,
+                font=dict(color=ms["color"], size=9),
+                textangle=-45,
+            )
+
+        # Status pattern
+        for i, row in filtered.iterrows():
+            if row["status"] == "Completed":
+                fig.add_annotation(
+                    x=row["Finish"], y=row["Task"],
+                    text="✅", showarrow=False, font=dict(size=16),
+                )
+            elif row["status"] == "In Progress":
+                fig.add_annotation(
+                    x=row["Start"], y=row["Task"],
+                    text="🔄", showarrow=False, font=dict(size=14),
+                    xshift=-15,
+                )
+
+        fig.update_layout(
+            height=500,
+            xaxis_title="",
+            yaxis_title="",
+            hovermode="closest",
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                title="Lead Country",
+            ),
+            margin=dict(b=100),
+        )
+
+        # Range slider
+        fig.update_xaxes(
+            rangeslider_visible=True,
+            rangeslider_thickness=0.08,
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Duration Bars ──
+    if view_mode in ("Duration Bars", "Both"):
+        st.subheader("⏱️ Duration Comparison")
+
+        fig2 = px.bar(
+            filtered,
+            x="Duration (months)",
+            y="Task",
+            color=lc,
+            orientation="h",
+            text="Duration (months)",
+            hover_data=["lead_partner", "status", "start_month", "end_month"],
+            color_discrete_map={
+                "Turkey": "#e74c3c",
+                "Poland": "#3498db",
+                "Spain": "#f39c12",
+            },
+        )
+
+        # Add budget as secondary info
+        if "budget_eur" in filtered.columns:
+            for i, row in filtered.iterrows():
+                fig2.add_annotation(
+                    x=row["Duration (months)"],
+                    y=row["Task"],
+                    text=f"€{row['budget_eur']:,.0f}",
+                    showarrow=False,
+                    xshift=35,
+                    font=dict(size=10, color="#666"),
+                )
+
+        fig2.update_traces(textposition="inside", textfont_size=12)
+        fig2.update_layout(
+            height=400,
+            yaxis=dict(autorange="reversed"),
+            xaxis_title="Duration (months)",
+            yaxis_title="",
+            showlegend=False,
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # ── Summary Stats ──
+    st.subheader("📈 Summary")
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    sc1.metric("Total WPs", len(filtered))
+    sc2.metric("Avg Duration", f"{filtered['Duration (months)'].mean():.1f} mo")
+    if "budget_eur" in filtered.columns:
+        sc3.metric("Total Budget", f"€{filtered['budget_eur'].sum():,.0f}")
+        sc4.metric("Avg Budget", f"€{filtered['budget_eur'].mean():,.0f}")
+
+    # ── WP Detail on Click ──
+    st.subheader("📦 Work Package Details")
+    selected_wp = st.selectbox(
+        "Select a work package to view details",
+        filtered["wp_id"].tolist(),
+        format_func=lambda x: f"{x}: {filtered[filtered['wp_id']==x]['wp_name'].values[0]}",
     )
 
-    fig.update_layout(height=450)
-    st.plotly_chart(fig, use_container_width=True)
+    if selected_wp:
+        wp = filtered[filtered["wp_id"] == selected_wp].iloc[0]
+        dc1, dc2, dc3 = st.columns(3)
+
+        with dc1:
+            st.markdown(f"**Lead:** {wp['lead_partner']}")
+            st.markdown(f"**Country:** {FLAGS.get(wp.get(lc, ''), '')} {wp.get(lc, '')}")
+            st.markdown(f"**Supporting:** {wp['supporting_partners']}")
+
+        with dc2:
+            st.markdown(f"**Period:** Month {wp['start_month']} → Month {wp['end_month']}")
+            st.markdown(f"**Duration:** {wp['Duration (months)']} months")
+            st.markdown(f"**Status:** {wp['status']}")
+
+        with dc3:
+            if "budget_eur" in wp.index:
+                st.metric("Budget", f"€{wp['budget_eur']:,.0f}")
+                pct = wp["budget_eur"] / TOTAL_BUDGET * 100
+                st.progress(pct / 100)
+                st.caption(f"{pct:.1f}% of total budget")
+
+        if "description" in wp.index:
+            st.info(f"**Description:** {wp['description']}")
+        if "deliverables" in wp.index:
+            st.markdown("**Deliverables:**")
+            for d in str(wp["deliverables"]).split(";"):
+                st.markdown(f"- {d.strip()}")
+
+    # ── Overlap Analysis ──
+    st.subheader("🔗 WP Overlap Analysis")
+    overlap_data = []
+    wps = filtered.to_dict("records")
+    for i, w1 in enumerate(wps):
+        for w2 in wps[i+1:]:
+            start = max(w1["start_month"], w2["start_month"])
+            end = min(w1["end_month"], w2["end_month"])
+            if start < end:
+                overlap_data.append({
+                    "WP Pair": f"{w1['wp_id']} + {w2['wp_id']}",
+                    "Overlap": f"M{start}–M{end}",
+                    "Months": end - start,
+                })
+
+    if overlap_data:
+        ov_df = pd.DataFrame(overlap_data).sort_values("Months", ascending=False)
+        fig3 = px.bar(ov_df, x="Months", y="WP Pair", orientation="h",
+                       text="Overlap", color="Months",
+                       color_continuous_scale="YlOrRd")
+        fig3.update_layout(height=300, yaxis=dict(autorange="reversed"))
+        st.plotly_chart(fig3, use_container_width=True)
+    else:
+        st.info("No overlapping work packages in current selection.")
 
 def page_partners(partners_df):
     st.title("OncoConnect Consortium")
