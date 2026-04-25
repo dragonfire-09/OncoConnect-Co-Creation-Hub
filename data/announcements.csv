@@ -1,3 +1,6 @@
-date,title,content,posted_by
-2026-04-25,Project workspace created,OncoConnect Co-Creation Hub MVP repository has been created.,Admin
-2026-04-25,Work package structure added,Initial WP1-WP5 structure has been added to the platform.,Admin
+announcement_id,date,title,content,author,priority
+A1,2025-05-15,OncoConnect Project Initiated,Consortium kickoff meeting held. All partners confirmed participation and agreed on project timeline.,Kanser Savaşçıları Derneği,High
+A2,2025-05-22,WP2 Survey Design Started,Fundacja Rakiety has begun drafting the patient needs assessment survey. Partners review deadline: June 10.,Fundacja Onkologiczna Rakiety,Medium
+A3,2025-05-28,Ethics Framework Discussion,Universitat de Barcelona shared initial ethical AI assessment framework. Each partner to review local ethics requirements.,Universitat de Barcelona,High
+A4,2025-06-01,Patient Advisory Board Call,First patient advisory board meeting scheduled for June 15. Two patient representatives from each country will participate.,Kanser Savaşçıları Derneği,Medium
+A5,2025-06-05,Co-Creation Workshop Planning,Workshop methodology document shared. Mixed-methods approach confirmed: online surveys + in-person focus groups.,Fundacja Onkologiczna Rakiety,Low
