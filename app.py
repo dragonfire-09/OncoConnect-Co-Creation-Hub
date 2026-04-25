@@ -1221,7 +1221,7 @@ def page_ai_center():
                 sm4.metric("Rejected", reject_n)
         else:
             st.info("No AI decisions yet.")
-
+            
     # ── TAB 4: AI Insights ──
     with t4:
         st.subheader("📊 AI-Generated Insights")
