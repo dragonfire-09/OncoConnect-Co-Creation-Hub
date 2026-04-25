@@ -206,7 +206,8 @@ def db_add_announcement(title, content, author, priority):
 # ═══════════════════════════════════════════════════
 # CONSTANTS
 # ═══════════════════════════════════════════════════
-SUBMISSION_DEADLINE = datetime(2026, 11, 15, 17, 0, 0)
+SUBMISSION_DEADLINE = datetime(2027, 5, 15, 17, 0, 0)
+PREPARATION_START = datetime(2025, 6, 5)
 PROJECT_START = datetime(2025, 9, 1)
 TOTAL_BUDGET = 60000
 
