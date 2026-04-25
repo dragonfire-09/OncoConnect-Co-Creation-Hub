@@ -461,10 +461,24 @@ def page_gantt(wp_df):
                        hover_data=["lead_partner", "status"],
                        color_discrete_map={"Turkey": "#e74c3c", "Poland": "#3498db", "Spain": "#f39c12"})
     fig.update_yaxes(autorange="reversed")
-    fig.add_vline(x=datetime.now(), line_dash="dash", line_color="red", annotation_text="Today")
+
+    # Today line (without annotation_text to avoid plotly bug)
+    today = datetime.now()
+    fig.add_shape(
+        type="line",
+        x0=today, x1=today,
+        y0=0, y1=1,
+        yref="paper",
+        line=dict(color="red", width=2, dash="dash"),
+    )
+    fig.add_annotation(
+        x=today, y=1.05, yref="paper",
+        text="Today", showarrow=False,
+        font=dict(color="red", size=12),
+    )
+
     fig.update_layout(height=450)
     st.plotly_chart(fig, use_container_width=True)
-
 
 def page_partners(partners_df):
     st.title("OncoConnect Consortium")
