@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import plotly.express as px 
 from datetime import datetime
 
 st.set_page_config(
