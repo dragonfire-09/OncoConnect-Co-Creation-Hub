@@ -1180,8 +1180,7 @@ def page_patient_feedback():
                         fig2 = px.histogram(pf_df, x="country", color="country", title="By Country")
                         fig2.update_layout(showlegend=False)
                         st.plotly_chart(fig2, use_container_width=True)
-        else:
-            st.info("No patient feedback yet.")
+         
             
     elif r == "Partner":
         st.markdown(
