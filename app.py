@@ -1107,42 +1107,67 @@ def page_patient_feedback():
     st.title("💚 Patient Feedback")
     r = get_role()
 
+    # 🟢 PATIENT: sadece form
     if r == "Patient":
         st.write("Your voice matters.")
+
         with st.form("pf_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
+
             with c1:
                 age = st.selectbox("Age Group", ["18-30", "31-45", "46-60", "60+"])
                 pf_country = st.selectbox("Country", ["Turkey", "Poland", "Spain", "Other"])
                 cancer = st.selectbox("Cancer Type", ["Prefer not to say", "Breast", "Lung", "Colorectal", "Prostate", "Other"])
+
             with c2:
-                support = st.selectbox("Needed Support", ["Peer support", "Psychological support", "Reliable information", "Treatment sharing", "Community belonging"])
-                digital = st.select_slider("Digital Comfort", ["Very Low", "Low", "Medium", "High", "Very High"], "Medium")
-                language = st.multiselect("Language(s)", ["Turkish", "Polish", "Spanish", "English"])
+                support = st.selectbox("Needed Support", [
+                    "Peer support", "Psychological support",
+                    "Reliable information", "Treatment sharing", "Community belonging"
+                ])
+                digital = st.select_slider("Digital Comfort",
+                    ["Very Low", "Low", "Medium", "High", "Very High"], "Medium")
+                language = st.multiselect("Language(s)",
+                    ["Turkish", "Polish", "Spanish", "English"])
+
             matching = st.text_area("What matters for matching?", height=100)
             privacy = st.text_area("Privacy expectations?", height=100)
+
             go = st.form_submit_button("Submit", type="primary", use_container_width=True)
+
             if go:
                 db_add_patient_feedback({
-                    "age_group": age, "country": pf_country, "cancer_type": cancer,
-                    "support_need": support, "digital_literacy": digital,
-                    "languages": ", ".join(language), "matching_preference": matching,
-                    "privacy_expectation": privacy, "content": f"{matching} | {privacy}",
-                    "category": support, "rating": 0, "submitted_by": "anonymous",
-                    "is_anonymous": True, "status": "New",
+                    "age_group": age,
+                    "country": pf_country,
+                    "cancer_type": cancer,
+                    "support_need": support,
+                    "digital_literacy": digital,
+                    "languages": ", ".join(language),
+                    "matching_preference": matching,
+                    "privacy_expectation": privacy,
+                    "content": f"{matching} | {privacy}",
+                    "category": support,
+                    "rating": 0,
+                    "submitted_by": "anonymous",
+                    "is_anonymous": True,
+                    "status": "New",
                 })
                 st.success("Thank you!")
                 st.balloons()
 
-        if r == "Admin" or st.session_state.get("can_read_patient_fb", False):
+    # 🔴 ADMIN / BOARD: veri görüntüleme
+    elif r == "Admin" or st.session_state.get("can_read_patient_fb", False):
+
         rows = db_get_patient_feedback()
+
         if rows:
-            st.divider()
             st.subheader("📋 Patient Feedback Data")
+
             if r != "Admin":
                 st.warning("🔒 Read-only access (board member permission).")
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No patient feedback yet.")
             if r == "Admin" and len(rows) > 2:
                 pf_df = pd.DataFrame(rows)
                 pi1, pi2 = st.columns(2)
@@ -1157,6 +1182,7 @@ def page_patient_feedback():
                         st.plotly_chart(fig2, use_container_width=True)
         else:
             st.info("No patient feedback yet.")
+            
     elif r == "Partner":
         st.markdown(
             "<div style='background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);"
