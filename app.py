@@ -1343,7 +1343,6 @@ def page_documents():
                     st.info("No files uploaded yet.")
             except Exception as e:
                 st.error(f"Error: {e}")
-
     with t2:
         if perm in ["full", "upload"]:
             with st.form("upload_form"):
