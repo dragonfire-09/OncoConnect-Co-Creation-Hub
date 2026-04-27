@@ -1837,20 +1837,17 @@ def page_gantt(wp_df):
         st.info("No WP data. Create data/work_packages.csv")
         return
 
-    # Check required columns
     if "start_month" not in wp_df.columns or "end_month" not in wp_df.columns:
         st.warning("CSV must have start_month and end_month columns.")
         return
 
     df = wp_df.copy()
 
-    # Filter for partner
     if r == "Partner" and c != "All":
         wps = get_user_wps(c)
         df = df[df["wp_id"].isin(wps)]
         st.info(f"Showing WPs for {FLAGS.get(c,'')} {c}")
 
-    # Convert month numbers (1-18) to actual dates based on PROJECT_START
     try:
         df["start_date"] = df["start_month"].apply(
             lambda m: PROJECT_START + timedelta(days=(int(m) - 1) * 30)
@@ -1862,7 +1859,6 @@ def page_gantt(wp_df):
         st.error(f"Date conversion error: {e}")
         return
 
-    # Use wp_name if available
     label_col = "wp_name" if "wp_name" in df.columns else "wp_id"
     df["label"] = df["wp_id"] + ": " + df[label_col]
 
@@ -1870,7 +1866,6 @@ def page_gantt(wp_df):
         st.warning("No data to display.")
         return
 
-    # Main Gantt Chart
     fig = px.timeline(
         df,
         x_start="start_date",
@@ -1901,36 +1896,56 @@ def page_gantt(wp_df):
         ),
     )
 
-    # Today line
-    fig.add_vline(
-        x=datetime.now(),
-        line_dash="dash",
-        line_color="red",
-        line_width=2,
-        annotation_text="📍 Today",
-        annotation_position="top",
+    # ── Bugün çizgisi (annotation OLMADAN shape olarak) ──
+    now = datetime.now()
+    fig.add_shape(
+        type="line",
+        x0=now, x1=now,
+        y0=0, y1=1,
+        yref="paper",
+        line=dict(color="red", width=2, dash="dash"),
+    )
+    fig.add_annotation(
+        x=now, y=1.05, yref="paper",
+        text="📍 Today",
+        showarrow=False,
+        font=dict(color="red", size=11, family="Inter"),
     )
 
-    # Project milestones
-    fig.add_vline(
-        x=PROJECT_START,
-        line_dash="dot",
-        line_color="#2ABFBF",
-        annotation_text="Project Start",
-        annotation_position="bottom",
+    # ── Project Start çizgisi ──
+    fig.add_shape(
+        type="line",
+        x0=PROJECT_START, x1=PROJECT_START,
+        y0=0, y1=1,
+        yref="paper",
+        line=dict(color="#2ABFBF", width=1.5, dash="dot"),
     )
+    fig.add_annotation(
+        x=PROJECT_START, y=-0.08, yref="paper",
+        text="Project Start",
+        showarrow=False,
+        font=dict(color="#2ABFBF", size=10),
+    )
+
+    # ── Project End çizgisi ──
     project_end = PROJECT_START + timedelta(days=18 * 30)
-    fig.add_vline(
-        x=project_end,
-        line_dash="dot",
-        line_color="#dc3545",
-        annotation_text="Project End",
-        annotation_position="bottom",
+    fig.add_shape(
+        type="line",
+        x0=project_end, x1=project_end,
+        y0=0, y1=1,
+        yref="paper",
+        line=dict(color="#dc3545", width=1.5, dash="dot"),
+    )
+    fig.add_annotation(
+        x=project_end, y=-0.08, yref="paper",
+        text="Project End",
+        showarrow=False,
+        font=dict(color="#dc3545", size=10),
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # Timeline details table
+    # ── Timeline Details Table ──
     st.markdown("### 📋 Timeline Details")
     timeline_data = []
     for _, row in df.iterrows():
@@ -1946,7 +1961,7 @@ def page_gantt(wp_df):
         })
     st.dataframe(pd.DataFrame(timeline_data), use_container_width=True, hide_index=True)
 
-    # Monthly activity heatmap
+    # ── Monthly Activity Heatmap ──
     st.markdown("### 📊 Monthly Activity Overview")
     months = list(range(1, 19))
     month_labels = []
@@ -1963,7 +1978,6 @@ def page_gantt(wp_df):
             heatmap_data.append({
                 "WP": row.get("wp_id", ""),
                 "Month": f"M{m}",
-                "Month_Label": month_labels[m - 1],
                 "Active": active,
             })
 
