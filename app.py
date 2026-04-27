@@ -1830,30 +1830,153 @@ def page_gantt(wp_df):
     c = get_country()
     st.markdown(
         "<div class='pro-header'><h1>📅 Gantt Chart</h1>"
-        "<p>Project timeline visualization</p></div>",
+        "<p>Project timeline visualization — 18-month implementation plan</p></div>",
         unsafe_allow_html=True,
     )
-    if len(wp_df) == 0 or "start_date" not in wp_df.columns:
-        st.info("No timeline data.")
+    if len(wp_df) == 0:
+        st.info("No WP data. Create data/work_packages.csv")
         return
+
+    # Check required columns
+    if "start_month" not in wp_df.columns or "end_month" not in wp_df.columns:
+        st.warning("CSV must have start_month and end_month columns.")
+        return
+
     df = wp_df.copy()
+
+    # Filter for partner
     if r == "Partner" and c != "All":
-        df = df[df["wp_id"].isin(get_user_wps(c))]
-    df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce")
-    df["end_date"] = pd.to_datetime(df["end_date"], errors="coerce")
-    df = df.dropna(subset=["start_date", "end_date"])
-    if df.empty:
-        st.warning("No valid dates.")
+        wps = get_user_wps(c)
+        df = df[df["wp_id"].isin(wps)]
+        st.info(f"Showing WPs for {FLAGS.get(c,'')} {c}")
+
+    # Convert month numbers (1-18) to actual dates based on PROJECT_START
+    try:
+        df["start_date"] = df["start_month"].apply(
+            lambda m: PROJECT_START + timedelta(days=(int(m) - 1) * 30)
+        )
+        df["end_date"] = df["end_month"].apply(
+            lambda m: PROJECT_START + timedelta(days=int(m) * 30)
+        )
+    except Exception as e:
+        st.error(f"Date conversion error: {e}")
         return
+
+    # Use wp_name if available
+    label_col = "wp_name" if "wp_name" in df.columns else "wp_id"
+    df["label"] = df["wp_id"] + ": " + df[label_col]
+
+    if df.empty:
+        st.warning("No data to display.")
+        return
+
+    # Main Gantt Chart
     fig = px.timeline(
-        df, x_start="start_date", x_end="end_date", y="wp_id", color="status",
-        color_discrete_map={"Completed": "#10B981", "In Progress": "#3B82F6", "Planned": "#94A3B8"},
+        df,
+        x_start="start_date",
+        x_end="end_date",
+        y="label",
+        color="status",
+        color_discrete_map={
+            "Completed": "#10B981",
+            "In Progress": "#3B82F6",
+            "Not Started": "#94A3B8",
+            "Planned": "#F59E0B",
+        },
+        hover_data=["lead_country", "budget_eur"],
     )
     fig.update_yaxes(autorange="reversed")
-    fig.update_layout(height=400)
-    fig.add_vline(x=datetime.now(), line_dash="dash", line_color="red", annotation_text="Today")
+    fig.update_layout(
+        height=max(350, len(df) * 70),
+        title="Project Implementation Timeline",
+        xaxis_title="",
+        yaxis_title="",
+        font=dict(size=12),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+        ),
+    )
+
+    # Today line
+    fig.add_vline(
+        x=datetime.now(),
+        line_dash="dash",
+        line_color="red",
+        line_width=2,
+        annotation_text="📍 Today",
+        annotation_position="top",
+    )
+
+    # Project milestones
+    fig.add_vline(
+        x=PROJECT_START,
+        line_dash="dot",
+        line_color="#2ABFBF",
+        annotation_text="Project Start",
+        annotation_position="bottom",
+    )
+    project_end = PROJECT_START + timedelta(days=18 * 30)
+    fig.add_vline(
+        x=project_end,
+        line_dash="dot",
+        line_color="#dc3545",
+        annotation_text="Project End",
+        annotation_position="bottom",
+    )
+
     st.plotly_chart(fig, use_container_width=True)
 
+    # Timeline details table
+    st.markdown("### 📋 Timeline Details")
+    timeline_data = []
+    for _, row in df.iterrows():
+        timeline_data.append({
+            "WP": row.get("wp_id", ""),
+            "Name": row.get("wp_name", row.get("title", "")),
+            "Lead": row.get("lead_country", ""),
+            "Start": f"M{row.get('start_month', '')} ({row['start_date'].strftime('%b %Y')})",
+            "End": f"M{row.get('end_month', '')} ({row['end_date'].strftime('%b %Y')})",
+            "Duration": f"{int(row.get('end_month', 0)) - int(row.get('start_month', 0)) + 1} months",
+            "Status": row.get("status", ""),
+            "Budget": f"€{row.get('budget_eur', 0):,.0f}",
+        })
+    st.dataframe(pd.DataFrame(timeline_data), use_container_width=True, hide_index=True)
+
+    # Monthly activity heatmap
+    st.markdown("### 📊 Monthly Activity Overview")
+    months = list(range(1, 19))
+    month_labels = []
+    for m in months:
+        d = PROJECT_START + timedelta(days=(m - 1) * 30)
+        month_labels.append(d.strftime("%b %y"))
+
+    heatmap_data = []
+    for _, row in df.iterrows():
+        sm = int(row.get("start_month", 1))
+        em = int(row.get("end_month", 18))
+        for m in months:
+            active = 1 if sm <= m <= em else 0
+            heatmap_data.append({
+                "WP": row.get("wp_id", ""),
+                "Month": f"M{m}",
+                "Month_Label": month_labels[m - 1],
+                "Active": active,
+            })
+
+    hm_df = pd.DataFrame(heatmap_data)
+    fig2 = px.imshow(
+        hm_df.pivot(index="WP", columns="Month", values="Active"),
+        color_continuous_scale=["#f1f5f9", "#2ABFBF"],
+        aspect="auto",
+        title="WP Activity per Month",
+    )
+    fig2.update_layout(height=300, coloraxis_showscale=False)
+    fig2.update_xaxes(tickangle=45)
+    st.plotly_chart(fig2, use_container_width=True)
 
 # ═══════════════════════════════════════
 # PAGE: PARTNERS
