@@ -1916,15 +1916,24 @@ def page_approval():
     for col, cn in zip(cols, ["Turkey", "Poland", "Spain"]):
         with col:
             approved = ap.get(cn, False)
-            bg = "linear-gradient(135deg,#dcfce7,#f0fdf4)" if approved else "linear-gradient(135deg,#fef9c3,#fffbeb)"
-            ic = "✅" if approved else "⏳"
+            if approved:
+                bg = "linear-gradient(135deg,#dcfce7,#f0fdf4)"
+                border_color = "#bbf7d0"
+                ic = "✅"
+                status_text = "Approved"
+            else:
+                bg = "linear-gradient(135deg,#fef9c3,#fffbeb)"
+                border_color = "#fde68a"
+                ic = "⏳"
+                status_text = "Pending"
+
             st.markdown(
                 f"<div style='background:{bg};border-radius:16px;padding:2rem;text-align:center;"
-                border_color = "#bbf7d0" if approved else "#fde68a"
+                f"border:1px solid {border_color};'>"
                 f"<div style='font-size:3rem;'>{FLAGS[cn]}</div>"
                 f"<h3 style='margin:0.5rem 0;'>{PARTNER_MAP[cn]}</h3>"
                 f"<div style='font-size:2rem;'>{ic}</div>"
-                f"<p style='color:#64748b;'>{'Approved' if approved else 'Pending'}</p></div>",
+                f"<p style='color:#64748b;'>{status_text}</p></div>",
                 unsafe_allow_html=True,
             )
 
@@ -1960,9 +1969,8 @@ def page_approval():
     if log:
         st.subheader("📋 History")
         df_log = pd.DataFrame(log)
-        show_cols = [c for c in ["action", "country", "performed_by", "role", "created_at"] if c in df_log.columns]
+        show_cols = [c2 for c2 in ["action", "country", "performed_by", "role", "created_at"] if c2 in df_log.columns]
         st.dataframe(df_log[show_cols].head(20), use_container_width=True, hide_index=True)
-
 
 # ═══════════════════════════════════════
 # PAGE: ANNOUNCEMENTS
