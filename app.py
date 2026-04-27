@@ -1,130 +1,93 @@
 """
-OncoConnect Co-Creation Hub
-Erasmus+ KA210 Small-Scale Partnership
-AI-Integrated Proposal Governance Platform
-═══════════════════════════════════════════
-v3.0 — Full Auth + Storage + AI Feedback Integration Engine
+OncoConnect Co-Creation Hub v4.0
+Erasmus+ KA210 — AI-Driven Proposal Governance Platform
+Full Auth + Storage + AI Engine + Meetings + Export
 """
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import json
-import time
-import io
-from datetime import datetime, timedelta, date
+import json, time, io
+from datetime import datetime, timedelta, date, time as dt_time
+from io import BytesIO
 
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════
 # PAGE CONFIG
-# ═══════════════════════════════════════════════════
-st.set_page_config(
-    page_title="OncoConnect Co-Creation Hub",
-    page_icon="🧬",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# ═══════════════════════════════════════
+st.set_page_config(page_title="OncoConnect Co-Creation Hub", page_icon="🧬", layout="wide", initial_sidebar_state="expanded")
 
-# ═══════════════════════════════════════════════════
-# SUPABASE CONNECTION
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════
+# SUPABASE
+# ═══════════════════════════════════════
 SUPABASE_OK = False
 try:
     from supabase import create_client, Client
-
     @st.cache_resource
     def get_supabase() -> Client:
-        url = st.secrets["supabase"]["url"]
-        key = st.secrets["supabase"]["key"]
-        return create_client(url, key)
-
+        return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
     _client = get_supabase()
     SUPABASE_OK = True
 except Exception:
     SUPABASE_OK = False
 
-
 def sb():
-    if SUPABASE_OK:
-        return get_supabase()
-    return None
+    return get_supabase() if SUPABASE_OK else None
 
-
-# ═══════════════════════════════════════════════════
-# AI ENGINE — OpenRouter / OpenAI Dual Support
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════
+# AI ENGINE — OpenRouter / OpenAI
+# ═══════════════════════════════════════
 AI_ENABLED = False
 USE_OPENROUTER = False
 ai_client = None
 ai_model = "gpt-4o-mini"
-
 try:
     import openai
-
-    openrouter_key = st.secrets.get("openrouter", {}).get("api_key", "")
-    openai_key = st.secrets.get("openai", {}).get("api_key", "")
-
-    if openrouter_key:
-        ai_client = openai.OpenAI(
-            api_key=openrouter_key,
-            base_url="https://openrouter.ai/api/v1"
-        )
+    ork = st.secrets.get("openrouter", {}).get("api_key", "")
+    oak = st.secrets.get("openai", {}).get("api_key", "")
+    if ork:
+        ai_client = openai.OpenAI(api_key=ork, base_url="https://openrouter.ai/api/v1")
         ai_model = st.secrets.get("openrouter", {}).get("model", "openai/gpt-4o-mini")
+        AI_ENABLED = True; USE_OPENROUTER = True
+    elif oak:
+        ai_client = openai.OpenAI(api_key=oak)
         AI_ENABLED = True
-        USE_OPENROUTER = True
-    elif openai_key:
-        ai_client = openai.OpenAI(api_key=openai_key)
-        ai_model = "gpt-4o-mini"
-        AI_ENABLED = True
-        USE_OPENROUTER = False
 except Exception:
-    AI_ENABLED = False
+    pass
 
+# ═══════════════════════════════════════
+# PDF / EXCEL
+# ═══════════════════════════════════════
+try:
+    from fpdf import FPDF
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    EXPORT_OK = True
+except ImportError:
+    EXPORT_OK = False
 
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════
 # CONSTANTS
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════
 SUBMISSION_DEADLINE = datetime(2027, 5, 15, 17, 0, 0)
 PREPARATION_START = datetime(2025, 6, 5)
 PROJECT_START = datetime(2025, 9, 1)
 TOTAL_BUDGET = 60000
 BUCKET = "oncoconnect-files"
 
-PARTNER_MAP = {
-    "Turkey": "Kanser Savaşçıları Derneği",
-    "Poland": "Fundacja Onkologiczna Rakiety",
-    "Spain": "Universitat de Barcelona",
-}
+PARTNER_MAP = {"Turkey": "Kanser Savaşçıları Derneği", "Poland": "Fundacja Onkologiczna Rakiety", "Spain": "Universitat de Barcelona"}
 FLAGS = {"Turkey": "🇹🇷", "Poland": "🇵🇱", "Spain": "🇪🇸"}
 ROLE_BADGES = {"Admin": "🛡️ Admin", "Partner": "🤝 Partner", "Patient": "💚 Patient"}
-
-PROPOSAL_SECTIONS = [
-    "Project Summary",
-    "Problem Analysis",
-    "Objectives",
-    "Methodology",
-    "Work Packages",
-    "Partnership",
-    "Impact",
-    "Evaluation",
-    "Budget",
-    "Dissemination",
-    "Ethics / GDPR",
-    "Sustainability",
-]
-
+PROPOSAL_SECTIONS = ["Project Summary", "Problem Analysis", "Objectives", "Methodology", "Work Packages", "Partnership", "Impact", "Evaluation", "Budget", "Dissemination", "Ethics / GDPR", "Sustainability"]
+PROPOSAL_SECTION_KEYS = [(s.lower().replace(" ", "_").replace("/", "").replace("  ", "_").strip("_"), s) for s in PROPOSAL_SECTIONS]
+# Fix keys
 PROPOSAL_SECTION_KEYS = [
-    ("project_summary", "Project Summary"),
-    ("problem_analysis", "Problem Analysis"),
-    ("objectives", "Objectives"),
-    ("methodology", "Methodology"),
-    ("work_packages", "Work Packages"),
-    ("partnership", "Partnership"),
-    ("impact", "Impact"),
-    ("evaluation", "Evaluation"),
-    ("budget", "Budget"),
-    ("dissemination", "Dissemination"),
-    ("ethics_gdpr", "Ethics / GDPR"),
+    ("project_summary", "Project Summary"), ("problem_analysis", "Problem Analysis"),
+    ("objectives", "Objectives"), ("methodology", "Methodology"),
+    ("work_packages", "Work Packages"), ("partnership", "Partnership"),
+    ("impact", "Impact"), ("evaluation", "Evaluation"), ("budget", "Budget"),
+    ("dissemination", "Dissemination"), ("ethics_gdpr", "Ethics / GDPR"),
     ("sustainability", "Sustainability"),
 ]
 
@@ -136,36 +99,12 @@ USERS_DB = {
     "patient": {"password": "patient123", "name": "Patient Participant", "role": "Patient", "country": "N/A", "org": "N/A", "can_read_patient_fb": False},
 }
 
-
-# ═══════════════════════════════════════════════════
-# WP → ÜLKE YETKİ MATRİSİ
-# ═══════════════════════════════════════════════════
 WP_COUNTRY_MAP = {
     "Turkey": {"lead": ["WP1", "WP4"], "support": ["WP2", "WP3", "WP5"]},
     "Poland": {"lead": ["WP2"], "support": ["WP3", "WP4", "WP5"]},
     "Spain": {"lead": ["WP3", "WP5"], "support": ["WP2", "WP4"]},
 }
 
-
-def get_user_wps(country):
-    if country == "All":
-        return ["WP1", "WP2", "WP3", "WP4", "WP5"]
-    m = WP_COUNTRY_MAP.get(country, {})
-    return m.get("lead", []) + m.get("support", [])
-
-
-def get_wp_role(country, wp):
-    m = WP_COUNTRY_MAP.get(country, {})
-    if wp in m.get("lead", []):
-        return "🟢 Lead"
-    elif wp in m.get("support", []):
-        return "🔵 Support"
-    return "⚪ —"
-
-
-# ═══════════════════════════════════════════════════
-# SAYFA YETKİ MATRİSİ
-# ═══════════════════════════════════════════════════
 PAGE_PERMISSIONS = {
     "Dashboard": {"Admin": "full", "Partner": "read", "Patient": "read"},
     "Work Packages": {"Admin": "full", "Partner": "filtered", "Patient": "none"},
@@ -176,1931 +115,1520 @@ PAGE_PERMISSIONS = {
     "Approval Status": {"Admin": "full", "Partner": "own", "Patient": "none"},
     "Announcements": {"Admin": "full", "Partner": "write", "Patient": "read"},
     "Documents": {"Admin": "full", "Partner": "upload", "Patient": "read"},
+    "Meetings": {"Admin": "full", "Partner": "read", "Patient": "read"},
     "🧠 AI Center": {"Admin": "full", "Partner": "none", "Patient": "none"},
     "Admin Panel": {"Admin": "full", "Partner": "none", "Patient": "none"},
     "User Management": {"Admin": "full", "Partner": "none", "Patient": "none"},
 }
 
+def get_user_wps(country):
+    if country == "All": return ["WP1","WP2","WP3","WP4","WP5"]
+    m = WP_COUNTRY_MAP.get(country, {})
+    return m.get("lead", []) + m.get("support", [])
 
-def check_access(page_name, role):
-    return PAGE_PERMISSIONS.get(page_name, {}).get(role, "none") != "none"
+def get_wp_role(country, wp):
+    m = WP_COUNTRY_MAP.get(country, {})
+    if wp in m.get("lead", []): return "🟢 Lead"
+    if wp in m.get("support", []): return "🔵 Support"
+    return "⚪ —"
 
+def check_access(page, role): return PAGE_PERMISSIONS.get(page, {}).get(role, "none") != "none"
+def get_permission(page, role): return PAGE_PERMISSIONS.get(page, {}).get(role, "none")
 
-def get_permission(page_name, role):
-    return PAGE_PERMISSIONS.get(page_name, {}).get(role, "none")
-
-
-# ═══════════════════════════════════════════════════
-# AUTH
-# ═══════════════════════════════════════════════════
-def init_session():
-    defaults = {
-        "authenticated": False, "username": None, "user_name": None,
-        "user_role": None, "user_country": None, "user_org": None,
-        "can_read_patient_fb": False, "current_page": "Dashboard",
+# ═══════════════════════════════════════
+# PROFESSIONAL CSS
+# ═══════════════════════════════════════
+def inject_pro_css():
+    st.markdown("""<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    
+    /* Global */
+    .stApp { font-family: 'Inter', sans-serif; }
+    
+    /* Header */
+    .pro-header {
+        background: linear-gradient(135deg, #1B3A5C 0%, #2d5a8e 50%, #2ABFBF 100%);
+        padding: 2rem 2.5rem; border-radius: 20px; margin-bottom: 2rem;
+        color: white; position: relative; overflow: hidden;
+        box-shadow: 0 10px 40px rgba(27,58,92,0.3);
     }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
+    .pro-header::before {
+        content: ''; position: absolute; top: -50%; right: -20%;
+        width: 300px; height: 300px; border-radius: 50%;
+        background: rgba(255,255,255,0.05);
+    }
+    .pro-header h1 { margin: 0; font-size: 2rem; font-weight: 800; letter-spacing: -0.5px; }
+    .pro-header p { margin: 0.3rem 0 0; opacity: 0.85; font-size: 0.95rem; font-weight: 300; }
+    
+    /* Metric Cards */
+    .metric-card {
+        background: linear-gradient(145deg, #ffffff, #f8f9fc);
+        border: 1px solid #e8ecf1; border-radius: 16px;
+        padding: 1.5rem; text-align: center;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        transition: transform 0.2s, box-shadow 0.2s;
+        border-top: 4px solid #2ABFBF;
+    }
+    .metric-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+    .metric-card .value { font-size: 2.2rem; font-weight: 800; color: #1B3A5C; }
+    .metric-card .label { font-size: 0.8rem; color: #8896a6; margin-top: 0.3rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+    
+    /* Meeting Cards */
+    .meeting-card {
+        background: white; border: 1px solid #e8ecf1;
+        border-radius: 16px; padding: 1.5rem;
+        margin-bottom: 1rem; border-left: 5px solid #2ABFBF;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+        transition: all 0.2s;
+    }
+    .meeting-card:hover { box-shadow: 0 5px 20px rgba(0,0,0,0.08); transform: translateY(-1px); }
+    .meeting-card.past { border-left-color: #94a3b8; opacity: 0.7; }
+    .meeting-card.today { border-left-color: #10B981; background: linear-gradient(135deg, #f0fdf4, #ffffff); }
+    
+    .meeting-date { font-size: 0.8rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+    .meeting-title { font-size: 1.2rem; font-weight: 700; color: #1B3A5C; margin: 0.3rem 0; }
+    .meeting-time { font-size: 1rem; color: #2ABFBF; font-weight: 600; }
+    .meeting-meta { font-size: 0.85rem; color: #64748b; margin-top: 0.5rem; }
+    
+    .zoom-btn {
+        display: inline-block; background: linear-gradient(135deg, #2D8CFF, #2681F2);
+        color: white !important; padding: 8px 20px; border-radius: 10px;
+        font-weight: 600; font-size: 0.85rem; text-decoration: none;
+        box-shadow: 0 3px 10px rgba(45,140,255,0.3); transition: all 0.2s;
+        margin-top: 0.5rem;
+    }
+    .zoom-btn:hover { transform: translateY(-1px); box-shadow: 0 5px 15px rgba(45,140,255,0.4); }
+    
+    /* Status badges */
+    .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+    .badge-success { background: #dcfce7; color: #16a34a; }
+    .badge-warning { background: #fef9c3; color: #ca8a04; }
+    .badge-danger { background: #fee2e2; color: #dc2626; }
+    .badge-info { background: #dbeafe; color: #2563eb; }
+    .badge-purple { background: #f3e8ff; color: #9333ea; }
+    
+    /* Feedback card */
+    .fb-card {
+        background: white; border: 1px solid #e8ecf1;
+        border-radius: 12px; padding: 1.2rem; margin: 0.5rem 0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    }
+    
+    /* Countdown */
+    .countdown-box {
+        border-radius: 16px; padding: 1.5rem; text-align: center;
+        color: white; min-height: 280px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    }
+    
+    /* Sidebar */
+    div[data-testid="stSidebar"] { background: linear-gradient(180deg, #0a1628 0%, #1B3A5C 100%); }
+    div[data-testid="stSidebar"] .stMarkdown { color: #cbd5e1; }
+    
+    /* Buttons */
+    .stButton > button { border-radius: 10px; font-weight: 600; transition: all 0.2s; letter-spacing: 0.3px; }
+    .stButton > button:hover { transform: translateY(-1px); }
+    
+    /* Announcements */
+    .ann-card {
+        border-left: 4px solid; padding: 1rem 1.2rem; margin-bottom: 0.7rem;
+        background: white; border-radius: 0 12px 12px 0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    
+    /* Access denied */
+    .access-denied {
+        background: linear-gradient(135deg, #fef2f2, #fff1f2);
+        border: 1px solid #fecaca; border-radius: 16px;
+        padding: 3rem; text-align: center; margin: 2rem 0;
+    }
+    
+    /* Tables */
+    .stDataFrame { border-radius: 12px; overflow: hidden; }
+    </style>""", unsafe_allow_html=True)
 
+
+# ═══════════════════════════════════════
+# AUTH
+# ═══════════════════════════════════════
+def init_session():
+    for k, v in {"authenticated": False, "username": None, "user_name": None, "user_role": None,
+                  "user_country": None, "user_org": None, "can_read_patient_fb": False}.items():
+        if k not in st.session_state: st.session_state[k] = v
 
 def render_login():
-    if st.session_state.get("authenticated"):
-        return True
-    st.markdown(
-        "<div style='text-align:center;padding:3rem 0 1rem;'>"
-        "<h1>🧬 OncoConnect</h1>"
-        "<h3 style='color:#555;font-weight:400;'>Co-Creation Hub</h3>"
-        "<p style='color:#777;'>Erasmus+ KA210 — AI-Driven Proposal Governance Platform</p>"
-        "</div>", unsafe_allow_html=True,
-    )
+    if st.session_state.get("authenticated"): return True
+    inject_pro_css()
+    st.markdown("<div style='text-align:center;padding:3rem 0 1rem;'><h1 style='font-size:3rem;'>🧬 OncoConnect</h1><h3 style='color:#64748b;font-weight:400;'>Co-Creation Hub</h3><p style='color:#94a3b8;'>Erasmus+ KA210 — AI-Driven Proposal Governance</p></div>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 2, 1])
     with col:
         with st.form("login"):
             username = st.text_input("Username", placeholder="admin / turkey / poland / spain / patient")
             password = st.text_input("Password", type="password")
-            go = st.form_submit_button("Login", use_container_width=True, type="primary")
-            if go:
-                user_data = None
+            if st.form_submit_button("Login", use_container_width=True, type="primary"):
+                ud = None
                 if SUPABASE_OK:
                     try:
                         res = sb().table("app_users").select("*").eq("username", username.strip().lower()).eq("is_active", True).execute()
                         if res.data:
                             u = res.data[0]
                             if u["password_hash"] == password:
-                                user_data = {"name": u["display_name"], "role": u["role"],
-                                             "country": u["country"], "org": u.get("organisation", "N/A"),
-                                             "can_read_patient_fb": u.get("can_read_patient_fb", False)}
-                    except Exception:
-                        pass
-                if not user_data:
+                                ud = {"name": u["display_name"], "role": u["role"], "country": u["country"],
+                                      "org": u.get("organisation", "N/A"), "can_read_patient_fb": u.get("can_read_patient_fb", False)}
+                    except: pass
+                if not ud:
                     u = USERS_DB.get(username)
                     if u and u["password"] == password:
-                        user_data = {"name": u["name"], "role": u["role"], "country": u["country"],
-                                     "org": u["org"], "can_read_patient_fb": u.get("can_read_patient_fb", False)}
-                if user_data:
-                    st.session_state.update(
-                        authenticated=True, username=username.strip().lower(),
-                        user_name=user_data["name"], user_role=user_data["role"],
-                        user_country=user_data["country"], user_org=user_data["org"],
-                        can_read_patient_fb=user_data["can_read_patient_fb"],
-                    )
+                        ud = {"name": u["name"], "role": u["role"], "country": u["country"], "org": u["org"], "can_read_patient_fb": u.get("can_read_patient_fb", False)}
+                if ud:
+                    st.session_state.update(authenticated=True, username=username.strip().lower(), user_name=ud["name"], user_role=ud["role"], user_country=ud["country"], user_org=ud["org"], can_read_patient_fb=ud["can_read_patient_fb"])
                     st.rerun()
-                else:
-                    st.error("Invalid credentials")
+                else: st.error("Invalid credentials")
         with st.expander("Demo Credentials"):
-            st.markdown(
-                "| User | Pass | Role |\n|---|---|---|\n"
-                "| admin | admin123 | Admin |\n| turkey | tr2025 | Partner TR |\n"
-                "| poland | pl2025 | Partner PL |\n| spain | es2025 | Partner ES |\n"
-                "| patient | patient123 | Patient |"
-            )
+            st.markdown("| User | Pass | Role |\n|---|---|---|\n| admin | admin123 | Admin |\n| turkey | tr2025 | Partner TR |\n| poland | pl2025 | Partner PL |\n| spain | es2025 | Partner ES |\n| patient | patient123 | Patient |")
     return False
 
-
 def logout():
-    for k in list(st.session_state.keys()):
-        del st.session_state[k]
+    for k in list(st.session_state.keys()): del st.session_state[k]
     st.rerun()
 
+def get_role(): return st.session_state.get("user_role", "Patient")
+def get_country(): return st.session_state.get("user_country", "N/A")
+def get_name(): return st.session_state.get("user_name", "User")
+def get_org(): return st.session_state.get("user_org", "N/A")
 
-def get_role():
-    return st.session_state.get("user_role", "Patient")
+# ═══════════════════════════════════════
+# STORAGE
+# ═══════════════════════════════════════
+def upload_to_storage(fb, path, ct="application/octet-stream"):
+    if not SUPABASE_OK: return False
+    try: sb().storage.from_(BUCKET).upload(path=path, file=fb, file_options={"content-type": ct, "upsert": "true"}); return True
+    except Exception as e: st.error(f"Upload error: {e}"); return False
 
-def get_country():
-    return st.session_state.get("user_country", "N/A")
+def download_from_storage(path):
+    if not SUPABASE_OK: return None
+    try: return sb().storage.from_(BUCKET).download(path)
+    except: return None
 
-def get_name():
-    return st.session_state.get("user_name", "User")
+def delete_from_storage(path):
+    if not SUPABASE_OK: return False
+    try: sb().storage.from_(BUCKET).remove([path]); return True
+    except: return False
 
-def get_org():
-    return st.session_state.get("user_org", "N/A")
+def save_document_metadata(fn, ft, fs, cat, desc, ub, co, sp, ver=1):
+    if not SUPABASE_OK: return
+    try: sb().table("documents").insert({"file_name": fn, "file_type": ft, "file_size": fs, "category": cat, "description": desc, "uploaded_by": ub, "country": co, "storage_path": sp, "version": ver, "is_active": True}).execute()
+    except Exception as e: st.error(f"Error: {e}")
 
-
-# ═══════════════════════════════════════════════════
-# SUPABASE STORAGE
-# ═══════════════════════════════════════════════════
-def upload_to_storage(file_bytes, storage_path, content_type="application/octet-stream"):
-    if not SUPABASE_OK:
-        return False
-    try:
-        sb().storage.from_(BUCKET).upload(path=storage_path, file=file_bytes,
-                                           file_options={"content-type": content_type, "upsert": "true"})
-        return True
-    except Exception as e:
-        st.error(f"Upload error: {e}")
-        return False
-
-
-def download_from_storage(storage_path):
-    if not SUPABASE_OK:
-        return None
-    try:
-        return sb().storage.from_(BUCKET).download(storage_path)
-    except Exception as e:
-        st.error(f"Download error: {e}")
-        return None
-
-
-def delete_from_storage(storage_path):
-    if not SUPABASE_OK:
-        return False
-    try:
-        sb().storage.from_(BUCKET).remove([storage_path])
-        return True
-    except:
-        return False
-
-
-def save_document_metadata(file_name, file_type, file_size, category, description, uploaded_by, country, storage_path, version=1):
-    if not SUPABASE_OK:
-        return
-    try:
-        sb().table("documents").insert({
-            "file_name": file_name, "file_type": file_type, "file_size": file_size,
-            "category": category, "description": description, "uploaded_by": uploaded_by,
-            "country": country, "storage_path": storage_path, "version": version, "is_active": True,
-        }).execute()
-    except Exception as e:
-        st.error(f"Metadata error: {e}")
-
-
-# ═══════════════════════════════════════════════════
-# DB — APPROVALS
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════
+# DB — ALL FUNCTIONS
+# ═══════════════════════════════════════
 def db_get_approvals():
-    default = {"Turkey": False, "Poland": False, "Spain": False}
-    if not SUPABASE_OK:
-        return st.session_state.get("local_approvals", default)
+    d = {"Turkey": False, "Poland": False, "Spain": False}
+    if not SUPABASE_OK: return st.session_state.get("local_approvals", d)
     try:
-        res = sb().table("approvals").select("country, approved").execute()
-        result = {r["country"]: r.get("approved", False) for r in (res.data or [])}
-        for c in ["Turkey", "Poland", "Spain"]:
-            if c not in result:
-                result[c] = False
-        return result
-    except:
-        return default
+        r = sb().table("approvals").select("country, approved").execute()
+        res = {x["country"]: x.get("approved", False) for x in (r.data or [])}
+        for c in d: res.setdefault(c, False)
+        return res
+    except: return d
 
-
-def db_set_approval(country_name, approved, performed_by, user_role):
-    now_str = datetime.utcnow().isoformat()
+def db_set_approval(cn, approved, by, role):
+    now = datetime.utcnow().isoformat()
     if not SUPABASE_OK:
-        if "local_approvals" not in st.session_state:
-            st.session_state["local_approvals"] = {"Turkey": False, "Poland": False, "Spain": False}
-        st.session_state["local_approvals"][country_name] = approved
-        return
+        st.session_state.setdefault("local_approvals", {"Turkey": False, "Poland": False, "Spain": False})[cn] = approved; return
     try:
-        sb().table("approvals").update({
-            "approved": approved, "status": "Approved" if approved else "Pending",
-            "approved_by": performed_by if approved else None,
-            "approved_at": now_str if approved else None, "updated_at": now_str,
-        }).eq("country", country_name).execute()
-        sb().table("approval_log").insert({
-            "action": "approved" if approved else "revoked",
-            "country": country_name, "performed_by": performed_by, "role": user_role,
-        }).execute()
-    except Exception as e:
-        st.error(f"DB Error: {e}")
+        sb().table("approvals").update({"approved": approved, "status": "Approved" if approved else "Pending", "approved_by": by if approved else None, "approved_at": now if approved else None, "updated_at": now}).eq("country", cn).execute()
+        sb().table("approval_log").insert({"action": "approved" if approved else "revoked", "country": cn, "performed_by": by, "role": role}).execute()
+    except Exception as e: st.error(f"Error: {e}")
 
-
-def db_reset_all_approvals(performed_by):
-    for c in ["Turkey", "Poland", "Spain"]:
-        db_set_approval(c, False, performed_by, "Admin")
-
+def db_reset_all_approvals(by):
+    for c in ["Turkey", "Poland", "Spain"]: db_set_approval(c, False, by, "Admin")
 
 def db_get_approval_log():
-    if not SUPABASE_OK:
-        return []
-    try:
-        return sb().table("approval_log").select("*").order("created_at", desc=True).execute().data or []
-    except:
-        return []
+    if not SUPABASE_OK: return []
+    try: return sb().table("approval_log").select("*").order("created_at", desc=True).execute().data or []
+    except: return []
 
-
-# ═══════════════════════════════════════════════════
-# DB — PARTNER FEEDBACK
-# ═══════════════════════════════════════════════════
 def db_get_partner_feedback():
+    if not SUPABASE_OK: return st.session_state.get("local_feedback", [])
+    try: return sb().table("partner_feedback").select("*").order("created_at", desc=True).execute().data or []
+    except: return []
+
+def db_add_partner_feedback(pc, org, sec, fb, pri, by):
     if not SUPABASE_OK:
-        return st.session_state.get("local_feedback", [])
+        st.session_state.setdefault("local_feedback", []).append({"id": len(st.session_state.get("local_feedback", [])) + 1, "partner_country": pc, "organisation": org, "section": sec, "feedback": fb, "content": fb, "priority": pri, "status": "Open", "submitted_by": by, "country": pc, "created_at": datetime.now().isoformat()}); return
+    try: sb().table("partner_feedback").insert({"partner_country": pc, "organisation": org, "section": sec, "feedback": fb, "content": fb, "priority": pri, "status": "Open", "submitted_by": by, "country": pc}).execute()
+    except Exception as e: st.error(f"Error: {e}")
+
+def db_update_feedback_status(fid, st2, resp=None):
+    if not SUPABASE_OK: return
     try:
-        return sb().table("partner_feedback").select("*").order("created_at", desc=True).execute().data or []
-    except:
-        return []
+        d = {"status": st2}
+        if resp: d["response"] = resp
+        sb().table("partner_feedback").update(d).eq("id", fid).execute()
+    except Exception as e: st.error(f"Error: {e}")
 
-
-def db_add_partner_feedback(p_country, org, section, feedback, priority, submitted_by):
-    if not SUPABASE_OK:
-        if "local_feedback" not in st.session_state:
-            st.session_state["local_feedback"] = []
-        st.session_state["local_feedback"].append({
-            "id": len(st.session_state["local_feedback"]) + 1,
-            "partner_country": p_country, "organisation": org, "section": section,
-            "feedback": feedback, "content": feedback, "priority": priority,
-            "status": "Open", "submitted_by": submitted_by, "country": p_country,
-            "created_at": datetime.now().isoformat(),
-        })
-        return
-    try:
-        sb().table("partner_feedback").insert({
-            "partner_country": p_country, "organisation": org, "section": section,
-            "feedback": feedback, "content": feedback, "priority": priority,
-            "status": "Open", "submitted_by": submitted_by, "country": p_country,
-        }).execute()
-    except Exception as e:
-        st.error(f"DB Error: {e}")
-
-
-def db_update_feedback_status(fb_id, new_status, response=None):
-    if not SUPABASE_OK:
-        return
-    try:
-        data = {"status": new_status}
-        if response:
-            data["response"] = response
-        sb().table("partner_feedback").update(data).eq("id", fb_id).execute()
-    except Exception as e:
-        st.error(f"DB Error: {e}")
-
-
-# ═══════════════════════════════════════════════════
-# DB — PATIENT FEEDBACK
-# ═══════════════════════════════════════════════════
 def db_get_patient_feedback():
-    if not SUPABASE_OK:
-        return st.session_state.get("local_patient_fb", [])
-    try:
-        return sb().table("patient_feedback").select("*").order("created_at", desc=True).execute().data or []
-    except:
-        return []
-
+    if not SUPABASE_OK: return st.session_state.get("local_patient_fb", [])
+    try: return sb().table("patient_feedback").select("*").order("created_at", desc=True).execute().data or []
+    except: return []
 
 def db_add_patient_feedback(data):
     if not SUPABASE_OK:
-        if "local_patient_fb" not in st.session_state:
-            st.session_state["local_patient_fb"] = []
-        data["id"] = len(st.session_state["local_patient_fb"]) + 1
-        data["created_at"] = datetime.now().isoformat()
-        st.session_state["local_patient_fb"].append(data)
-        return
-    try:
-        sb().table("patient_feedback").insert(data).execute()
-    except Exception as e:
-        st.error(f"DB Error: {e}")
+        data["id"] = len(st.session_state.get("local_patient_fb", [])) + 1; data["created_at"] = datetime.now().isoformat()
+        st.session_state.setdefault("local_patient_fb", []).append(data); return
+    try: sb().table("patient_feedback").insert(data).execute()
+    except Exception as e: st.error(f"Error: {e}")
 
-
-# ═══════════════════════════════════════════════════
-# DB — ANNOUNCEMENTS
-# ═══════════════════════════════════════════════════
 def db_get_announcements():
-    if not SUPABASE_OK:
-        return st.session_state.get("local_announcements", [])
-    try:
-        return sb().table("announcements").select("*").order("created_at", desc=True).execute().data or []
-    except:
-        return []
-
+    if not SUPABASE_OK: return st.session_state.get("local_ann", [])
+    try: return sb().table("announcements").select("*").order("created_at", desc=True).execute().data or []
+    except: return []
 
 def db_add_announcement(title, content, author, priority):
     if not SUPABASE_OK:
-        if "local_announcements" not in st.session_state:
-            st.session_state["local_announcements"] = []
-        st.session_state["local_announcements"].append({
-            "id": len(st.session_state["local_announcements"]) + 1,
-            "title": title, "content": content, "author": author,
-            "priority": priority, "created_at": datetime.now().isoformat(),
-        })
-        return
-    try:
-        sb().table("announcements").insert({
-            "title": title, "content": content, "author": author, "priority": priority,
-        }).execute()
-    except Exception as e:
-        st.error(f"DB Error: {e}")
+        st.session_state.setdefault("local_ann", []).append({"id": len(st.session_state.get("local_ann", [])) + 1, "title": title, "content": content, "author": author, "priority": priority, "created_at": datetime.now().isoformat()}); return
+    try: sb().table("announcements").insert({"title": title, "content": content, "author": author, "priority": priority}).execute()
+    except Exception as e: st.error(f"Error: {e}")
 
-
-# ═══════════════════════════════════════════════════
-# DB — AI / IMPROVEMENT LOG
-# ═══════════════════════════════════════════════════
-def db_log_improvement(feedback_id, section, original, updated, reasoning, action, created_by):
+def db_log_improvement(fid, sec, old, new, reason, action, by):
     if not SUPABASE_OK:
-        if "local_improvement_log" not in st.session_state:
-            st.session_state["local_improvement_log"] = []
-        st.session_state["local_improvement_log"].append({
-            "id": len(st.session_state["local_improvement_log"]) + 1,
-            "feedback_id": feedback_id, "section": section, "original_text": original,
-            "updated_text": updated, "ai_reasoning": reasoning, "action": action,
-            "created_by": created_by, "created_at": datetime.now().isoformat(),
-        })
-        return
-    try:
-        sb().table("improvement_log").insert({
-            "feedback_id": feedback_id, "section": section, "original_text": original,
-            "updated_text": updated, "ai_reasoning": reasoning, "action": action, "created_by": created_by,
-        }).execute()
-    except Exception as e:
-        st.error(f"Log error: {e}")
-
+        st.session_state.setdefault("local_imp", []).append({"id": len(st.session_state.get("local_imp", [])) + 1, "feedback_id": fid, "section": sec, "original_text": old, "updated_text": new, "ai_reasoning": reason, "action": action, "created_by": by, "created_at": datetime.now().isoformat()}); return
+    try: sb().table("improvement_log").insert({"feedback_id": fid, "section": sec, "original_text": old, "updated_text": new, "ai_reasoning": reason, "action": action, "created_by": by}).execute()
+    except: pass
 
 def db_get_improvement_log():
+    if not SUPABASE_OK: return st.session_state.get("local_imp", [])
+    try: return sb().table("improvement_log").select("*").order("created_at", desc=True).execute().data or []
+    except: return []
+
+def db_log_ai_decision(fid, dec, conf, reason, target):
     if not SUPABASE_OK:
-        return st.session_state.get("local_improvement_log", [])
-    try:
-        return sb().table("improvement_log").select("*").order("created_at", desc=True).execute().data or []
-    except:
-        return []
-
-
-def db_log_ai_decision(feedback_id, decision, confidence, reasoning, target_section):
-    if not SUPABASE_OK:
-        if "local_ai_decisions" not in st.session_state:
-            st.session_state["local_ai_decisions"] = []
-        st.session_state["local_ai_decisions"].append({
-            "id": len(st.session_state["local_ai_decisions"]) + 1,
-            "feedback_id": feedback_id, "decision": decision, "confidence": confidence,
-            "reasoning": reasoning, "target_section": target_section,
-            "created_at": datetime.now().isoformat(),
-        })
-        return
-    try:
-        sb().table("ai_decisions").insert({
-            "feedback_id": feedback_id, "decision": decision, "confidence": confidence,
-            "reasoning": reasoning, "target_section": target_section,
-        }).execute()
-    except Exception as e:
-        st.error(f"AI log error: {e}")
-
+        st.session_state.setdefault("local_ai", []).append({"id": len(st.session_state.get("local_ai", [])) + 1, "feedback_id": fid, "decision": dec, "confidence": conf, "reasoning": reason, "target_section": target, "created_at": datetime.now().isoformat()}); return
+    try: sb().table("ai_decisions").insert({"feedback_id": fid, "decision": dec, "confidence": conf, "reasoning": reason, "target_section": target}).execute()
+    except: pass
 
 def db_get_ai_decisions():
-    if not SUPABASE_OK:
-        return st.session_state.get("local_ai_decisions", [])
-    try:
-        return sb().table("ai_decisions").select("*").order("created_at", desc=True).execute().data or []
-    except:
-        return []
+    if not SUPABASE_OK: return st.session_state.get("local_ai", [])
+    try: return sb().table("ai_decisions").select("*").order("created_at", desc=True).execute().data or []
+    except: return []
 
-
-# ═══════════════════════════════════════════════════
-# DB — PROPOSAL SECTIONS
-# ═══════════════════════════════════════════════════
 def db_get_proposal_sections():
-    if not SUPABASE_OK:
-        return st.session_state.get("local_sections", [])
-    try:
-        return sb().table("proposal_sections").select("*").eq("is_active", True).order("section_order").execute().data or []
-    except:
-        return []
-
+    if not SUPABASE_OK: return st.session_state.get("local_sec", [])
+    try: return sb().table("proposal_sections").select("*").eq("is_active", True).order("section_order").execute().data or []
+    except: return []
 
 def db_get_section_by_key(key):
-    if not SUPABASE_OK:
-        sections = st.session_state.get("local_sections", [])
-        return next((s for s in sections if s.get("section_key") == key), None)
+    if not SUPABASE_OK: return next((s for s in st.session_state.get("local_sec", []) if s.get("section_key") == key), None)
     try:
-        res = sb().table("proposal_sections").select("*").eq("section_key", key).eq("is_active", True).execute()
-        return res.data[0] if res.data else None
-    except:
-        return None
+        r = sb().table("proposal_sections").select("*").eq("section_key", key).eq("is_active", True).execute()
+        return r.data[0] if r.data else None
+    except: return None
 
-
-def db_update_section_content(section_key, new_content, updated_by, feedback_id=None):
-    if not SUPABASE_OK:
-        return 1
+def db_update_section_content(sk, content, by, fid=None):
+    if not SUPABASE_OK: return 1
     try:
-        current = db_get_section_by_key(section_key)
-        new_version = (current.get("version", 1) + 1) if current else 1
-        sb().table("proposal_sections").update({
-            "content": new_content, "version": new_version,
-            "last_updated_by": updated_by, "last_feedback_id": feedback_id,
-            "updated_at": datetime.utcnow().isoformat(),
-        }).eq("section_key", section_key).eq("is_active", True).execute()
-        return new_version
-    except Exception as e:
-        st.error(f"Section update error: {e}")
-        return None
+        cur = db_get_section_by_key(sk)
+        nv = (cur.get("version", 1) + 1) if cur else 1
+        sb().table("proposal_sections").update({"content": content, "version": nv, "last_updated_by": by, "last_feedback_id": fid, "updated_at": datetime.utcnow().isoformat()}).eq("section_key", sk).eq("is_active", True).execute()
+        return nv
+    except Exception as e: st.error(f"Error: {e}"); return None
 
-
-def _find_section_for_feedback(fb_section):
-    """Feedback section adından proposal section bul"""
-    section_key = fb_section.lower().replace(" ", "_").replace("/", "_").replace(" ", "")
-    section_data = db_get_section_by_key(section_key)
-    if section_data:
-        return section_data
-    sections = db_get_proposal_sections()
-    for s in sections:
-        if s["section_title"].lower() == fb_section.lower():
-            return s
-        if fb_section.lower() in s["section_title"].lower():
-            return s
+def _find_section_for_feedback(sec):
+    sk = sec.lower().replace(" ", "_").replace("/", "_").replace("__", "_").strip("_")
+    sd = db_get_section_by_key(sk)
+    if sd: return sd
+    for s in db_get_proposal_sections():
+        if s["section_title"].lower() == sec.lower() or sec.lower() in s["section_title"].lower(): return s
     return None
 
+# ─── MEETINGS DB ───
+def db_get_meetings():
+    if not SUPABASE_OK: return st.session_state.get("local_meetings", [])
+    try: return sb().table("meetings").select("*").order("meeting_date", desc=False).execute().data or []
+    except: return []
 
-# ═══════════════════════════════════════════════════
+def db_add_meeting(data):
+    if not SUPABASE_OK:
+        data["id"] = len(st.session_state.get("local_meetings", [])) + 1
+        data["created_at"] = datetime.now().isoformat()
+        st.session_state.setdefault("local_meetings", []).append(data); return
+    try: sb().table("meetings").insert(data).execute()
+    except Exception as e: st.error(f"Error: {e}")
+
+def db_update_meeting(mid, data):
+    if not SUPABASE_OK: return
+    try: sb().table("meetings").update(data).eq("id", mid).execute()
+    except Exception as e: st.error(f"Error: {e}")
+
+def db_delete_meeting(mid):
+    if not SUPABASE_OK: return
+    try: sb().table("meetings").delete().eq("id", mid).execute()
+    except Exception as e: st.error(f"Error: {e}")
+
+    # ═══════════════════════════════════════
 # AI ENGINE
-# ═══════════════════════════════════════════════════
-def ai_analyze_feedback_v2(feedback_text, section_key, section_content):
+# ═══════════════════════════════════════
+def ai_analyze_feedback_v2(ft, sk, sc):
     if not AI_ENABLED or not ai_client:
-        return {
-            "decision": "manual_review", "confidence": 0,
-            "reasoning": "AI not configured.", "target_section": section_key,
-            "suggested_action": "review", "suggested_text": "",
-            "priority": "medium", "affected_wp": "", "erasmus_criteria": {},
-        }
+        return {"decision": "manual_review", "confidence": 0, "reasoning": "AI not configured.", "target_section": sk, "suggested_action": "review", "suggested_text": "", "priority": "medium", "affected_wp": "", "erasmus_criteria": {}}
     try:
-        response = ai_client.chat.completions.create(
-            model=ai_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": """You are an expert Erasmus+ KA210 Small-Scale Partnership proposal analyst for the OncoConnect project.
-
-PROJECT: OncoConnect — Structured peer mentorship for cancer patients (Turkey, Poland, Spain).
-PROGRAMME: Erasmus+ KA210 Adult Education | BUDGET: €60,000 | DURATION: 18 months
-
-WPs: WP1=Management(TR), WP2=Needs Analysis(PL), WP3=Matching System(ES), WP4=Pilot(TR), WP5=Evaluation(ES+PL)
-
-ERASMUS+ KA210 CRITERIA:
-1. Relevance to adult education 2. Quality of design 3. Partnership quality
-4. Impact & dissemination 5. Inclusion & diversity 6. Digital dimension 7. Sustainability
-
-Return JSON:
-{
-    "decision": "integrate"|"revise"|"route"|"archive"|"reject"|"ethical_risk",
-    "confidence": 0.0-1.0,
-    "reasoning": "2-3 sentences",
-    "target_section": "section_key if routing",
-    "suggested_action": "specific action",
-    "suggested_text": "If integrate/revise: revised text in academic English",
-    "priority": "critical"|"high"|"medium"|"low",
-    "affected_wp": "WP1-WP5",
-    "erasmus_criteria": {"relevance":bool,"methodology":bool,"partnership":bool,"impact":bool,"inclusion":bool,"digital":bool,"sustainability":bool}
-}
-
-DECISIONS: integrate=relevant+high quality, revise=good idea needs rewording, route=wrong section, archive=future value, reject=off-topic, ethical_risk=privacy concern"""
-                },
-                {
-                    "role": "user",
-                    "content": f"SECTION: {section_key}\n\nCURRENT CONTENT:\n{section_content if section_content else '[Empty]'}\n\nFEEDBACK:\n{feedback_text}"
-                }
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.3, max_tokens=1500,
-        )
-        return json.loads(response.choices[0].message.content)
+        r = ai_client.chat.completions.create(model=ai_model, messages=[
+            {"role": "system", "content": """You are an Erasmus+ KA210 proposal analyst for OncoConnect (peer mentorship for cancer patients: Turkey, Poland, Spain). Return JSON: {"decision":"integrate|revise|route|archive|reject|ethical_risk","confidence":0.0-1.0,"reasoning":"2-3 sentences","target_section":"section_key","suggested_action":"action","suggested_text":"revised text in academic English","priority":"critical|high|medium|low","affected_wp":"WP1-WP5","erasmus_criteria":{"relevance":bool,"methodology":bool,"partnership":bool,"impact":bool,"inclusion":bool,"digital":bool,"sustainability":bool}}"""},
+            {"role": "user", "content": f"SECTION: {sk}\nCONTENT:\n{sc or '[Empty]'}\nFEEDBACK:\n{ft}"}
+        ], response_format={"type": "json_object"}, temperature=0.3, max_tokens=1500)
+        return json.loads(r.choices[0].message.content)
     except Exception as e:
-        return {
-            "decision": "manual_review", "confidence": 0,
-            "reasoning": f"AI error: {str(e)}", "target_section": section_key,
-            "suggested_action": "review", "suggested_text": "",
-            "priority": "medium", "affected_wp": "", "erasmus_criteria": {},
-        }
+        return {"decision": "manual_review", "confidence": 0, "reasoning": f"AI error: {e}", "target_section": sk, "suggested_action": "review", "suggested_text": "", "priority": "medium", "affected_wp": "", "erasmus_criteria": {}}
 
-
-def ai_generate_section_revision(section_key, section_content, feedback_text):
-    if not AI_ENABLED or not ai_client:
-        return "AI not configured."
+def ai_generate_section_revision(sk, sc, fb):
+    if not AI_ENABLED or not ai_client: return "AI not configured."
     try:
-        response = ai_client.chat.completions.create(
-            model=ai_model,
-            messages=[
-                {"role": "system", "content": "You are an expert Erasmus+ KA210 proposal writer. Write in formal academic English. Be specific and measurable. Output ONLY the revised section text."},
-                {"role": "user", "content": f"SECTION: {section_key}\n\nCURRENT:\n{section_content or '[Empty]'}\n\nFEEDBACK:\n{feedback_text}\n\nWrite improved version:"}
-            ],
-            temperature=0.4, max_tokens=2000,
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"AI error: {str(e)}"
+        r = ai_client.chat.completions.create(model=ai_model, messages=[
+            {"role": "system", "content": "Expert Erasmus+ KA210 proposal writer. Formal academic English. Output ONLY revised text."},
+            {"role": "user", "content": f"SECTION: {sk}\nCURRENT:\n{sc or '[Empty]'}\nFEEDBACK:\n{fb}\nWrite improved version:"}
+        ], temperature=0.4, max_tokens=2000)
+        return r.choices[0].message.content
+    except Exception as e: return f"AI error: {e}"
 
-
-def ai_generate_summary(feedback_list):
-    if not AI_ENABLED or not ai_client or not feedback_list:
-        return "AI not available."
+def ai_generate_summary(fbl):
+    if not AI_ENABLED or not ai_client or not fbl: return "AI not available."
     try:
-        fb_text = "\n".join([f"- [{f.get('section', '')}] {f.get('feedback', f.get('content', ''))}" for f in feedback_list[:20]])
-        response = ai_client.chat.completions.create(
-            model=ai_model,
-            messages=[
-                {"role": "system", "content": "Summarize key themes from these Erasmus+ KA210 partner feedback items. Be concise."},
-                {"role": "user", "content": fb_text}
-            ],
-            temperature=0.3, max_tokens=800,
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"AI error: {str(e)}"
+        ft = "\n".join([f"- [{f.get('section','')}] {f.get('feedback', f.get('content',''))}" for f in fbl[:20]])
+        r = ai_client.chat.completions.create(model=ai_model, messages=[
+            {"role": "system", "content": "Summarize key themes from Erasmus+ KA210 feedback. Be concise."},
+            {"role": "user", "content": ft}
+        ], temperature=0.3, max_tokens=800)
+        return r.choices[0].message.content
+    except Exception as e: return f"AI error: {e}"
 
-
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════
 # PROPOSAL MD PARSER
-# ═══════════════════════════════════════════════════
-def parse_proposal_md(md_text):
-    mapping = {
-        "project summary": "project_summary", "problem analysis": "problem_analysis",
-        "needs analysis": "problem_analysis", "objectives": "objectives",
-        "methodology": "methodology", "work packages": "work_packages",
-        "partnership": "partnership", "consortium": "partnership",
-        "impact": "impact", "evaluation": "evaluation", "budget": "budget",
-        "dissemination": "dissemination", "ethics": "ethics_gdpr",
-        "gdpr": "ethics_gdpr", "data protection": "ethics_gdpr",
-        "sustainability": "sustainability",
-    }
-    result = {}
-    current_key = None
-    current_lines = []
-    for line in md_text.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("## ") or stripped.startswith("# "):
-            if current_key and current_lines:
-                result[current_key] = "\n".join(current_lines).strip()
-            title = stripped.lstrip("# ").strip().lower()
-            current_key = None
-            for keyword, sec_key in mapping.items():
-                if keyword in title:
-                    current_key = sec_key
-                    break
-            current_lines = []
-        else:
-            if current_key:
-                current_lines.append(line)
-    if current_key and current_lines:
-        result[current_key] = "\n".join(current_lines).strip()
+# ═══════════════════════════════════════
+def parse_proposal_md(md):
+    mapping = {"project summary": "project_summary", "problem analysis": "problem_analysis", "needs analysis": "problem_analysis", "objectives": "objectives", "methodology": "methodology", "work packages": "work_packages", "partnership": "partnership", "consortium": "partnership", "impact": "impact", "evaluation": "evaluation", "budget": "budget", "dissemination": "dissemination", "ethics": "ethics_gdpr", "gdpr": "ethics_gdpr", "sustainability": "sustainability"}
+    result, ck, cl = {}, None, []
+    for line in md.split("\n"):
+        s = line.strip()
+        if s.startswith("## ") or s.startswith("# "):
+            if ck and cl: result[ck] = "\n".join(cl).strip()
+            t = s.lstrip("# ").strip().lower(); ck = None
+            for kw, sk in mapping.items():
+                if kw in t: ck = sk; break
+            cl = []
+        elif ck: cl.append(line)
+    if ck and cl: result[ck] = "\n".join(cl).strip()
     return result
 
+# ═══════════════════════════════════════
+# EXPORT ENGINE
+# ═══════════════════════════════════════
+def generate_feedback_excel():
+    if not EXPORT_OK: return None
+    wb = Workbook()
+    hf = Font(bold=True, color="FFFFFF", size=11)
+    hfl = PatternFill(start_color="1B3A5C", end_color="1B3A5C", fill_type="solid")
+    bd = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+    wa = Alignment(wrap_text=True, vertical="top")
+    pfb = db_get_partner_feedback()
+    patfb = db_get_patient_feedback()
+    
+    # Summary
+    ws = wb.active; ws.title = "Summary"; ws.sheet_properties.tabColor = "1B3A5C"
+    ws["A1"] = "OncoConnect — Feedback Export Report"; ws["A1"].font = Font(bold=True, size=16, color="1B3A5C")
+    ws["A2"] = f"Generated: {datetime.now().strftime('%d %B %Y, %H:%M')}"; ws["A2"].font = Font(italic=True, color="666666")
+    stats = [("Total Partner Feedback", len(pfb)), ("Total Patient Feedback", len(patfb)),
+             ("Open", len([f for f in pfb if f.get("status") == "Open"])),
+             ("Accepted", len([f for f in pfb if f.get("status") == "Accepted"])),
+             ("Rejected", len([f for f in pfb if f.get("status") == "Rejected"]))]
+    for i, (l, v) in enumerate(stats, 5): ws[f"A{i}"] = l; ws[f"A{i}"].font = Font(bold=True); ws[f"B{i}"] = v
+    ws.column_dimensions["A"].width = 35; ws.column_dimensions["B"].width = 15
+    
+    # All feedback
+    ws2 = wb.create_sheet("All Partner Feedback"); ws2.sheet_properties.tabColor = "2ABFBF"
+    headers = ["ID", "Date", "Country", "Organisation", "Section", "Priority", "Status", "Feedback", "Response"]
+    for c, h in enumerate(headers, 1):
+        cell = ws2.cell(row=1, column=c, value=h); cell.font = hf; cell.fill = hfl; cell.border = bd
+    for i, fb in enumerate(pfb, 2):
+        vals = [fb.get("id",""), str(fb.get("created_at",""))[:10], fb.get("partner_country", fb.get("country","")),
+                fb.get("organisation",""), fb.get("section",""), fb.get("priority",""), fb.get("status",""),
+                fb.get("feedback", fb.get("content","")), fb.get("response","")]
+        for c, v in enumerate(vals, 1):
+            cell = ws2.cell(row=i, column=c, value=str(v) if v else ""); cell.border = bd; cell.alignment = wa
+    for i, w in enumerate([8,12,12,30,20,10,12,60,40], 1): ws2.column_dimensions[get_column_letter(i)].width = w
+    ws2.auto_filter.ref = f"A1:I{len(pfb)+1}"
+    
+    # Section sheets
+    secs = sorted(set(f.get("section", "General") for f in pfb))
+    for sn in secs:
+        safe = sn[:28].replace("/", "-")
+        wss = wb.create_sheet(safe); wss.sheet_properties.tabColor = "F39C12"
+        wss["A1"] = sn; wss["A1"].font = Font(bold=True, size=14, color="1B3A5C")
+        sd = _find_section_for_feedback(sn)
+        sr = 4
+        if sd and sd.get("content"):
+            wss["A3"] = "PROPOSAL CONTENT:"; wss["A3"].font = Font(bold=True, color="2ABFBF")
+            wss["A4"] = sd["content"][:2000]; wss["A4"].alignment = wa; sr = 7
+        fh = ["ID", "Date", "Country", "Priority", "Status", "Feedback", "Response"]
+        for c, h in enumerate(fh, 1):
+            cell = wss.cell(row=sr, column=c, value=h); cell.font = hf; cell.fill = hfl; cell.border = bd
+        for i, fb in enumerate([f for f in pfb if f.get("section") == sn], sr + 1):
+            vals = [fb.get("id",""), str(fb.get("created_at",""))[:10], fb.get("partner_country", fb.get("country","")),
+                    fb.get("priority",""), fb.get("status",""), fb.get("feedback", fb.get("content","")), fb.get("response","")]
+            for c, v in enumerate(vals, 1):
+                cell = wss.cell(row=i, column=c, value=str(v) if v else ""); cell.border = bd; cell.alignment = wa
+        for i, w in enumerate([8,12,15,10,12,60,40], 1): wss.column_dimensions[get_column_letter(i)].width = w
+    
+    # Patient
+    if patfb:
+        wsp = wb.create_sheet("Patient Feedback"); wsp.sheet_properties.tabColor = "A855F7"
+        ph = ["ID", "Date", "Country", "Age", "Cancer", "Support Need", "Digital", "Matching", "Privacy"]
+        for c, h in enumerate(ph, 1):
+            cell = wsp.cell(row=1, column=c, value=h); cell.font = hf; cell.fill = PatternFill(start_color="6F42C1", end_color="6F42C1", fill_type="solid"); cell.border = bd
+        for i, p in enumerate(patfb, 2):
+            vals = [p.get("id",""), str(p.get("created_at",""))[:10], p.get("country",""), p.get("age_group",""),
+                    p.get("cancer_type",""), p.get("support_need",""), p.get("digital_literacy",""),
+                    p.get("matching_preference",""), p.get("privacy_expectation","")]
+            for c, v in enumerate(vals, 1):
+                cell = wsp.cell(row=i, column=c, value=str(v) if v else ""); cell.border = bd; cell.alignment = wa
+    
+    out = BytesIO(); wb.save(out); out.seek(0); return out.getvalue()
 
-# ═══════════════════════════════════════════════════
-# DATA
-# ═══════════════════════════════════════════════════
+
+def generate_feedback_pdf():
+    if not EXPORT_OK: return None
+    class P(FPDF):
+        def header(self):
+            self.set_font("Helvetica", "B", 10); self.set_text_color(27,58,92)
+            self.cell(0, 8, "OncoConnect - Feedback Report", align="L")
+            self.cell(0, 8, datetime.now().strftime("%d %B %Y"), align="R", new_x="LMARGIN", new_y="NEXT")
+            self.set_draw_color(42,191,191); self.line(10, self.get_y(), 200, self.get_y()); self.ln(5)
+        def footer(self):
+            self.set_y(-15); self.set_font("Helvetica", "I", 8); self.set_text_color(128,128,128)
+            self.cell(0, 10, f"OncoConnect | Erasmus+ KA210 | Page {self.page_no()}/{{nb}}", align="C")
+        def stitle(self, t):
+            self.set_font("Helvetica", "B", 14); self.set_text_color(27,58,92); self.set_fill_color(240,242,246)
+            self.cell(0, 10, t, fill=True, new_x="LMARGIN", new_y="NEXT"); self.ln(3)
+        def body(self, t):
+            self.set_font("Helvetica", "", 9); self.set_text_color(51,51,51)
+            self.multi_cell(0, 5, t.encode("latin-1", "replace").decode("latin-1") if t else ""); self.ln(2)
+    
+    pdf = P(); pdf.alias_nb_pages(); pdf.set_auto_page_break(auto=True, margin=20)
+    pfb = db_get_partner_feedback(); patfb = db_get_patient_feedback(); ap = db_get_approvals()
+    
+    # Cover
+    pdf.add_page(); pdf.ln(30); pdf.set_font("Helvetica", "B", 28); pdf.set_text_color(27,58,92)
+    pdf.cell(0, 15, "OncoConnect", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 14); pdf.set_text_color(42,191,191)
+    pdf.cell(0, 10, "Feedback & AI Analysis Report", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5); pdf.set_font("Helvetica", "", 11); pdf.set_text_color(128,128,128)
+    pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%d %B %Y, %H:%M')}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(10); pdf.set_font("Helvetica", "", 10); pdf.set_text_color(51,51,51)
+    for l in [f"Partner Feedback: {len(pfb)}", f"Patient Feedback: {len(patfb)}", f"Approvals: {sum(1 for v in ap.values() if v)}/3"]:
+        pdf.cell(0, 7, l, align="C", new_x="LMARGIN", new_y="NEXT")
+    
+    # Sections
+    secs = sorted(set(f.get("section", "General") for f in pfb))
+    for sn in secs:
+        pdf.add_page(); pdf.stitle(f"Section: {sn}")
+        sd = _find_section_for_feedback(sn)
+        if sd and sd.get("content"):
+            pdf.set_font("Helvetica", "B", 11); pdf.set_text_color(42,191,191)
+            pdf.cell(0, 8, "Proposal Content:", new_x="LMARGIN", new_y="NEXT")
+            pdf.body(sd["content"][:1000])
+        sfbs = [f for f in pfb if f.get("section") == sn]
+        pdf.set_font("Helvetica", "B", 11); pdf.set_text_color(27,58,92)
+        pdf.cell(0, 8, f"Feedback ({len(sfbs)} items):", new_x="LMARGIN", new_y="NEXT"); pdf.ln(2)
+        for fb in sfbs:
+            fc = fb.get("partner_country", fb.get("country", ""))
+            fl = {"Turkey": "[TR]", "Poland": "[PL]", "Spain": "[ES]"}.get(fc, f"[{fc}]")
+            pdf.set_font("Helvetica", "B", 9)
+            pc = {"High": (220,53,69), "Medium": (255,193,7), "Low": (40,167,69)}.get(fb.get("priority",""), (128,128,128))
+            pdf.set_text_color(*pc)
+            pdf.cell(0, 6, f"#{fb.get('id','')} | {fl} | {fb.get('priority','')} | {fb.get('status','')}", new_x="LMARGIN", new_y="NEXT")
+            pdf.body(fb.get("feedback", fb.get("content", "")))
+            if pdf.get_y() > 260: pdf.add_page()
+    
+    return bytes(pdf.output())
+
+# ═══════════════════════════════════════
+# DATA + UI HELPERS
+# ═══════════════════════════════════════
 @st.cache_data
-def load_csv(path):
-    try:
-        return pd.read_csv(path)
-    except FileNotFoundError:
-        return pd.DataFrame()
+def load_csv(p):
+    try: return pd.read_csv(p)
+    except: return pd.DataFrame()
 
+def load_static(): return load_csv("data/work_packages.csv"), load_csv("data/partners.csv")
 
-def load_static():
-    return load_csv("data/work_packages.csv"), load_csv("data/partners.csv")
-
-
-# ═══════════════════════════════════════════════════
-# UI HELPERS
-# ═══════════════════════════════════════════════════
 def render_countdown():
     now = datetime.now()
-    prep_total = (SUBMISSION_DEADLINE - PREPARATION_START).days
-    prep_elapsed = (now - PREPARATION_START).days
-    prep_progress = max(0.0, min(1.0, prep_elapsed / max(prep_total, 1)))
-    rem = SUBMISSION_DEADLINE - now
-    if rem.total_seconds() <= 0:
-        st.error("SUBMISSION DEADLINE PASSED!")
-        return
-    days = rem.days
-    hours, rem2 = divmod(rem.seconds, 3600)
-    minutes, _ = divmod(rem2, 60)
-    sub_color = "#17a2b8" if days > 365 else "#28a745" if days > 180 else "#ffc107" if days > 60 else "#dc3545"
-    pct = int(prep_progress * 100)
-    deg = int(prep_progress * 360)
-    prep_color = "#a855f7" if prep_progress < 0.5 else "#f59e0b" if prep_progress < 0.8 else "#ef4444"
-
-    cl, cr = st.columns(2)
-    with cl:
-        st.markdown(
-            f"<div style='background:linear-gradient(135deg,#1a1a2e,#2d1b4e);border-radius:16px;padding:1.5rem;text-align:center;color:white;min-height:280px;'>"
-            f"<p style='margin:0;font-size:.75rem;opacity:.7;letter-spacing:2px;'>PREPARATION PHASE</p>"
-            f"<div style='margin:1rem auto;width:120px;height:120px;border-radius:50%;background:conic-gradient({prep_color} {deg}deg, #333 0deg);display:flex;align-items:center;justify-content:center;'>"
-            f"<div style='width:100px;height:100px;border-radius:50%;background:#1a1a2e;display:flex;align-items:center;justify-content:center;flex-direction:column;'>"
-            f"<span style='font-size:1.8rem;font-weight:bold;color:{prep_color};'>{pct}%</span>"
-            f"<span style='font-size:.65rem;opacity:.6;'>COMPLETE</span></div></div>"
-            f"<p style='margin:0;font-size:.8rem;opacity:.6;'>Started: {PREPARATION_START.strftime('%d %b %Y')} | Elapsed: {prep_elapsed} days</p></div>",
-            unsafe_allow_html=True,
-        )
-    with cr:
-        st.markdown(
-            f"<div style='background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);border-radius:16px;padding:1.5rem;text-align:center;color:white;min-height:280px;'>"
-            f"<p style='margin:0;font-size:.75rem;opacity:.7;letter-spacing:2px;'>SUBMISSION DEADLINE</p>"
-            f"<p style='margin:.3rem 0 0;font-size:.85rem;opacity:.8;'>{SUBMISSION_DEADLINE.strftime('%d %B %Y, %H:%M')}</p>"
-            f"<div style='display:flex;justify-content:center;gap:1.5rem;margin:1.2rem 0;'>"
-            f"<div><span style='font-size:2.8rem;font-weight:bold;color:{sub_color};'>{days}</span><br><span style='font-size:.75rem;opacity:.6;'>DAYS</span></div>"
-            f"<div><span style='font-size:2.8rem;font-weight:bold;color:{sub_color};'>{hours:02d}</span><br><span style='font-size:.75rem;opacity:.6;'>HOURS</span></div>"
-            f"<div><span style='font-size:2.8rem;font-weight:bold;color:{sub_color};'>{minutes:02d}</span><br><span style='font-size:.75rem;opacity:.6;'>MIN</span></div></div>"
-            f"<p style='margin:0;font-size:.8rem;opacity:.6;'>Erasmus+ KA210 Expected Call 2027</p></div>",
-            unsafe_allow_html=True,
-        )
-    st.progress(max(0.0, min(1.0, 1 - days / max(prep_total, 1))))
-
+    pt = (SUBMISSION_DEADLINE - PREPARATION_START).days; pe = (now - PREPARATION_START).days
+    pp = max(0, min(1, pe / max(pt, 1))); rem = SUBMISSION_DEADLINE - now
+    if rem.total_seconds() <= 0: st.error("DEADLINE PASSED!"); return
+    d = rem.days; h, r2 = divmod(rem.seconds, 3600); m, _ = divmod(r2, 60)
+    sc = "#17a2b8" if d > 365 else "#28a745" if d > 180 else "#ffc107" if d > 60 else "#dc3545"
+    pct = int(pp * 100); deg = int(pp * 360)
+    pc = "#a855f7" if pp < 0.5 else "#f59e0b" if pp < 0.8 else "#ef4444"
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"<div class='countdown-box' style='background:linear-gradient(135deg,#1a1a2e,#2d1b4e);'><p style='margin:0;font-size:.75rem;opacity:.7;letter-spacing:2px;'>PREPARATION PHASE</p><div style='margin:1rem auto;width:120px;height:120px;border-radius:50%;background:conic-gradient({pc} {deg}deg,#333 0deg);display:flex;align-items:center;justify-content:center;'><div style='width:100px;height:100px;border-radius:50%;background:#1a1a2e;display:flex;align-items:center;justify-content:center;flex-direction:column;'><span style='font-size:1.8rem;font-weight:bold;color:{pc};'>{pct}%</span><span style='font-size:.65rem;opacity:.6;'>COMPLETE</span></div></div><p style='margin:0;font-size:.8rem;opacity:.6;'>Elapsed: {pe} days</p></div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"<div class='countdown-box' style='background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);'><p style='margin:0;font-size:.75rem;opacity:.7;letter-spacing:2px;'>SUBMISSION DEADLINE</p><p style='margin:.3rem 0 0;font-size:.85rem;opacity:.8;'>{SUBMISSION_DEADLINE.strftime('%d %B %Y')}</p><div style='display:flex;justify-content:center;gap:1.5rem;margin:1.2rem 0;'><div><span style='font-size:2.8rem;font-weight:bold;color:{sc};'>{d}</span><br><span style='font-size:.75rem;opacity:.6;'>DAYS</span></div><div><span style='font-size:2.8rem;font-weight:bold;color:{sc};'>{h:02d}</span><br><span style='font-size:.75rem;opacity:.6;'>HOURS</span></div><div><span style='font-size:2.8rem;font-weight:bold;color:{sc};'>{m:02d}</span><br><span style='font-size:.75rem;opacity:.6;'>MIN</span></div></div></div>", unsafe_allow_html=True)
+    st.progress(max(0, min(1, 1 - d / max(pt, 1))))
 
 def ann_card(row):
     p = row.get("priority", "Low")
-    icon = {"High": "🔴", "Medium": "🟡"}.get(p, "🟢")
     border = {"High": "#dc3545", "Medium": "#ffc107"}.get(p, "#28a745")
-    st.markdown(
-        f"<div style='border-left:4px solid {border};padding:1rem;margin-bottom:.7rem;background:#f8f9fa;border-radius:0 8px 8px 0;'>"
-        f"<strong>{icon} {row.get('title', '')}</strong>"
-        f"<span style='float:right;color:#666;font-size:.85rem;'>{str(row.get('created_at', ''))[:10]}</span>"
-        f"<br><span style='color:#444;'>{row.get('content', '')}</span>"
-        f"<br><span style='font-size:.8rem;color:#999;'>By: {row.get('author', '')}</span></div>",
-        unsafe_allow_html=True,
-    )
-
+    icon = {"High": "🔴", "Medium": "🟡"}.get(p, "🟢")
+    st.markdown(f"<div class='ann-card' style='border-left-color:{border};'><strong>{icon} {row.get('title','')}</strong><span style='float:right;color:#666;font-size:.85rem;'>{str(row.get('created_at',''))[:10]}</span><br><span style='color:#444;'>{row.get('content','')}</span><br><span style='font-size:.8rem;color:#999;'>By: {row.get('author','')}</span></div>", unsafe_allow_html=True)
 
 def show_access_denied():
-    st.markdown(
-        "<div style='background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);"
-        "border-radius:12px;padding:2rem;text-align:center;margin:2rem 0;'>"
-        "<h2>🔒 Access Denied</h2><p>You don't have permission to view this page.</p></div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown("<div class='access-denied'><h2>🔒 Access Denied</h2><p>You don't have permission.</p></div>", unsafe_allow_html=True)
 
-
-# ═══════════════════════════════════════════════════
-# PAGE: DASHBOARD
-# ═══════════════════════════════════════════════════
-def page_dashboard(wp_df, partners_df):
-    role, country = get_role(), get_country()
-    st.title("🧬 OncoConnect Co-Creation Hub")
-    st.caption("Erasmus+ KA210 — AI-Driven Proposal Governance Platform")
-    render_countdown()
-
-    approvals = db_get_approvals()
-    fb_count = len(db_get_partner_feedback())
-    ai_count = len(db_get_ai_decisions())
-    approved_n = sum(1 for v in approvals.values() if v)
-    try:
-        doc_count = len(sb().table("documents").select("id").eq("is_active", True).execute().data or []) if SUPABASE_OK else 0
-    except:
-        doc_count = 0
-
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Work Packages", len(wp_df) if len(wp_df) > 0 else 5)
-    c2.metric("Partners", len(partners_df) if len(partners_df) > 0 else 3)
-    c3.metric("Feedback", fb_count)
-    c4.metric("AI Decisions", ai_count)
-    c5.metric("Approvals", f"{approved_n}/3")
-    c6.metric("Documents", doc_count)
-
-    st.subheader("⚡ System Status")
-    sc1, sc2, sc3 = st.columns(3)
-    with sc1:
-        (st.success if SUPABASE_OK else st.warning)(f"🔗 Database: {'Connected' if SUPABASE_OK else 'Local'}")
-    with sc2:
-        (st.success if AI_ENABLED else st.warning)(f"🧠 AI: {'Active (' + ai_model + ')' if AI_ENABLED else 'Inactive'}")
-    with sc3:
-        (st.success if approved_n == 3 else st.warning)(f"🗳️ Approvals: {approved_n}/3")
-
-    if role == "Partner" and country in WP_COUNTRY_MAP:
-        user_wps = get_user_wps(country)
-        leads = WP_COUNTRY_MAP[country]["lead"]
-        st.info(f"🔒 **{country}** — WPs: {', '.join(user_wps)} | Lead: {', '.join(leads)}")
-
-    st.subheader("🗳️ Partner Approval")
-    ac1, ac2, ac3 = st.columns(3)
-    for col, cn in zip([ac1, ac2, ac3], ["Turkey", "Poland", "Spain"]):
-        ok = approvals.get(cn, False)
-        with col:
-            (st.success if ok else st.warning)(f"{FLAGS[cn]} {PARTNER_MAP[cn]} — {'Approved' if ok else 'Pending'}")
-
-    if len(wp_df) > 0:
-        ch1, ch2 = st.columns(2)
-        with ch1:
-            st.subheader("💰 Budget")
-            if "budget_eur" in wp_df.columns:
-                fig = px.pie(wp_df, names="wp_id", values="budget_eur", color_discrete_sequence=px.colors.qualitative.Set2)
-                fig.update_traces(textposition="inside", textinfo="percent+label")
-                fig.update_layout(height=380)
-                st.plotly_chart(fig, use_container_width=True)
-        with ch2:
-            st.subheader("📊 WP Status")
-            sc = wp_df["status"].value_counts().reset_index()
-            sc.columns = ["status", "count"]
-            fig2 = px.bar(sc, x="status", y="count", color="status")
-            fig2.update_layout(height=380, showlegend=False)
-            st.plotly_chart(fig2, use_container_width=True)
-
-        st.subheader("📋 Work Packages")
-        if role == "Partner" and country in WP_COUNTRY_MAP:
-            filtered_wp = wp_df[wp_df["wp_id"].isin(get_user_wps(country))]
-        else:
-            filtered_wp = wp_df
-        cols = [c for c in ["wp_id", "wp_name", "lead_country", "start_month", "end_month", "status", "budget_eur"] if c in filtered_wp.columns]
-        st.dataframe(filtered_wp[cols], use_container_width=True, hide_index=True)
-
-    st.subheader("📢 Latest Announcements")
-    for a in db_get_announcements()[:3]:
-        ann_card(a)
-
-
-# ═══════════════════════════════════════════════════
-# PAGE: WORK PACKAGES
-# ═══════════════════════════════════════════════════
-def page_work_packages(wp_df):
-    st.title("📦 Work Packages")
-    role, country = get_role(), get_country()
-    if len(wp_df) == 0:
-        st.warning("work_packages.csv not found.")
-        return
-    if role == "Partner" and country in WP_COUNTRY_MAP:
-        user_wps = get_user_wps(country)
-        filtered = wp_df[wp_df["wp_id"].isin(user_wps)]
-        st.info(f"🔒 **{country}** — visible WPs: {', '.join(user_wps)}")
-    else:
-        filtered = wp_df
-    sel = st.selectbox("Select WP", filtered["wp_id"].tolist())
-    wp = filtered[filtered["wp_id"] == sel].iloc[0]
-    rl = get_wp_role(country, sel) if role == "Partner" else ""
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        st.subheader(f"{wp['wp_id']}: {wp['wp_name']} {rl}")
-        st.write(f"**Lead:** {wp['lead_partner']} ({wp.get('lead_country', '')})")
-        st.write(f"**Supporting:** {wp['supporting_partners']}")
-        st.write(f"**Duration:** M{wp['start_month']}–M{wp['end_month']}")
-        if "description" in wp.index:
-            st.write(f"**Description:** {wp['description']}")
-        if "deliverables" in wp.index:
-            for d in str(wp["deliverables"]).split(";"):
-                st.write(f"- {d.strip()}")
-    with c2:
-        st.metric("Status", wp["status"])
-        if "budget_eur" in wp.index:
-            st.metric("Budget", f"€{wp['budget_eur']:,.0f}")
-    st.divider()
-    st.dataframe(filtered, use_container_width=True, hide_index=True)
-
-
-# ═══════════════════════════════════════════════════
-# PAGE: GANTT
-# ═══════════════════════════════════════════════════
-def page_gantt(wp_df):
-    st.title("📊 Interactive Gantt Chart")
-    role, country = get_role(), get_country()
-    if len(wp_df) == 0:
-        st.warning("work_packages.csv not found.")
-        return
-    g = wp_df.copy()
-    if role == "Partner" and country in WP_COUNTRY_MAP:
-        user_wps = get_user_wps(country)
-        g = g[g["wp_id"].isin(user_wps)]
-        st.info(f"🔒 Filtered: {', '.join(user_wps)}")
-
-    g["Start"] = g["start_month"].apply(lambda m: PROJECT_START + timedelta(days=(m - 1) * 30))
-    g["Finish"] = g["end_month"].apply(lambda m: PROJECT_START + timedelta(days=m * 30))
-    g["Task"] = g["wp_id"] + ": " + g["wp_name"]
-    g["Duration (months)"] = g["end_month"] - g["start_month"]
-    lc = "lead_country" if "lead_country" in g.columns else "lead_partner"
-
-    fc1, fc2, fc3 = st.columns(3)
-    with fc1:
-        sel_c = st.multiselect("Country", g[lc].unique().tolist(), default=g[lc].unique().tolist())
-    with fc2:
-        sel_s = st.multiselect("Status", g["status"].unique().tolist(), default=g["status"].unique().tolist())
-    with fc3:
-        view = st.radio("View", ["Timeline", "Duration", "Both"], horizontal=True)
-
-    filt = g[g[lc].isin(sel_c) & g["status"].isin(sel_s)]
-    if filt.empty:
-        st.warning("No WPs match.")
-        return
-
-    if view in ("Timeline", "Both"):
-        fig = px.timeline(filt, x_start="Start", x_end="Finish", y="Task", color=lc,
-                          color_discrete_map={"Turkey": "#e74c3c", "Poland": "#3498db", "Spain": "#f39c12"})
-        fig.update_yaxes(autorange="reversed")
-        today = datetime.now()
-        fig.add_shape(type="line", x0=today, x1=today, y0=0, y1=1, yref="paper",
-                      line=dict(color="red", width=2, dash="dash"))
-        milestones = [
-            {"month": 1, "label": "Kickoff", "color": "#28a745"},
-            {"month": 6, "label": "Needs Report", "color": "#17a2b8"},
-            {"month": 10, "label": "Protocol", "color": "#f39c12"},
-            {"month": 15, "label": "Pilot Done", "color": "#e74c3c"},
-            {"month": 18, "label": "Final", "color": "#6f42c1"},
-        ]
-        for ms in milestones:
-            md = PROJECT_START + timedelta(days=(ms["month"] - 1) * 30)
-            fig.add_shape(type="line", x0=md, x1=md, y0=0, y1=1, yref="paper",
-                          line=dict(color=ms["color"], width=1, dash="dot"))
-        fig.update_layout(height=500, margin=dict(b=100))
-        fig.update_xaxes(rangeslider_visible=True, rangeslider_thickness=0.08)
-        st.plotly_chart(fig, use_container_width=True)
-
-    if view in ("Duration", "Both"):
-        fig2 = px.bar(filt, x="Duration (months)", y="Task", color=lc, orientation="h", text="Duration (months)",
-                      color_discrete_map={"Turkey": "#e74c3c", "Poland": "#3498db", "Spain": "#f39c12"})
-        fig2.update_traces(textposition="inside")
-        fig2.update_layout(height=400, yaxis=dict(autorange="reversed"), showlegend=False)
-        st.plotly_chart(fig2, use_container_width=True)
-
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("WPs", len(filt))
-    s2.metric("Avg Duration", f"{filt['Duration (months)'].mean():.1f} mo")
-    if "budget_eur" in filt.columns:
-        s3.metric("Total Budget", f"€{filt['budget_eur'].sum():,.0f}")
-        s4.metric("Avg Budget", f"€{filt['budget_eur'].mean():,.0f}")
-
-
-# ═══════════════════════════════════════════════════
-# PAGE: PARTNERS
-# ═══════════════════════════════════════════════════
-def page_partners(partners_df):
-    st.title("🤝 OncoConnect Consortium")
-    if len(partners_df) > 0:
-        for _, p in partners_df.iterrows():
-            flag = FLAGS.get(p["country"], "")
-            clr = "#e74c3c" if p["role"] == "Coordinator" else "#3498db"
-            cn = p["country"]
-            wps = get_user_wps(cn)
-            leads = WP_COUNTRY_MAP.get(cn, {}).get("lead", [])
-            st.markdown(
-                f"<div style='border:1px solid #e0e0e0;border-radius:12px;padding:1.5rem;margin-bottom:1rem;background:white;border-left:5px solid {clr};'>"
-                f"<h3 style='margin:0 0 .5rem;'>{flag} {p['organisation']}</h3>"
-                f"<p><strong>Country:</strong> {cn} | <strong>Role:</strong> <span style='color:{clr};font-weight:600;'>{p['role']}</span> | <strong>Type:</strong> {p.get('type', 'N/A')}</p>"
-                f"<p><strong>WPs:</strong> {', '.join(wps)} | <strong>Lead:</strong> {', '.join(leads)}</p>"
-                f"<p style='color:#555;'>{p.get('description', '')}</p></div>",
-                unsafe_allow_html=True,
-            )
-    else:
-        for cn, org in PARTNER_MAP.items():
-            wps = get_user_wps(cn)
-            leads = WP_COUNTRY_MAP.get(cn, {}).get("lead", [])
-            st.markdown(f"### {FLAGS[cn]} {org}")
-            st.write(f"**WPs:** {', '.join(wps)} | **Lead:** {', '.join(leads)}")
-    st.subheader("🗺️ Partner Locations")
-    st.map(pd.DataFrame({"lat": [39.93, 52.23, 41.39], "lon": [32.86, 21.01, 2.17]}), zoom=3)
-
-
-# ═══════════════════════════════════════════════════
-# PAGE: PARTNER FEEDBACK (section-linked)
-# ═══════════════════════════════════════════════════
-def page_partner_feedback():
-    st.title("💬 Partner Feedback")
-    r, c = get_role(), get_country()
-
-    if r in ("Admin", "Partner"):
-        with st.form("fb_form", clear_on_submit=True):
-            if r == "Partner":
-                fb_country = c
-                fb_org = get_org()
-                st.write(f"**Partner:** {FLAGS.get(c, '')} {fb_org}")
-            else:
-                fb_country = st.selectbox("Country", ["Turkey", "Poland", "Spain"])
-                fb_org = PARTNER_MAP.get(fb_country, "")
-
-            section = st.selectbox("Proposal Section", PROPOSAL_SECTIONS)
-
-            # Bölüm içeriğini göster
-            section_data = _find_section_for_feedback(section)
-            if section_data and section_data.get("content"):
-                st.markdown("**📄 Current section content:**")
-                st.markdown(
-                    f"<div style='background:#f0f0f0;padding:1rem;border-radius:8px;max-height:200px;overflow-y:auto;font-size:0.9rem;color:#333;'>"
-                    f"{section_data['content'][:800]}{'...' if len(section_data.get('content', '')) > 800 else ''}</div>",
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.caption("ℹ️ This section has no content yet.")
-
-            text = st.text_area("Your Feedback", height=150, placeholder="Write your feedback about this section...")
-            priority = st.select_slider("Priority", ["Low", "Medium", "High"], "Medium")
-            go = st.form_submit_button("Submit Feedback", type="primary", use_container_width=True)
-            if go and text.strip():
-                db_add_partner_feedback(fb_country, fb_org, section, text, priority, get_name())
-                st.success("✅ Feedback saved!")
-                st.rerun()
-
-    st.divider()
-    rows = db_get_partner_feedback()
-    if rows:
-        df = pd.DataFrame(rows)
-        if "section" in df.columns:
-            filt = st.multiselect("Filter by Section", sorted(df["section"].unique()))
-            if filt:
-                df = df[df["section"].isin(filt)]
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-        if r == "Admin" and len(df) > 0:
-            st.subheader("🔧 Update Status")
-            fb_id = st.selectbox("Feedback ID", df["id"].tolist())
-            new_st = st.selectbox("Status", ["Open", "Under Review", "Accepted", "Rejected", "Archived", "Routed"])
-            resp = st.text_input("Response")
-            if st.button("Update"):
-                db_update_feedback_status(fb_id, new_st, resp if resp else None)
-                st.rerun()
-
-        if len(df) > 2:
-            fc1, fc2 = st.columns(2)
-            with fc1:
-                if "section" in df.columns:
-                    st.plotly_chart(px.histogram(df, x="section", color="section", title="By Section").update_layout(showlegend=False, height=350), use_container_width=True)
-            with fc2:
-                cc = "partner_country" if "partner_country" in df.columns else "country"
-                if cc in df.columns:
-                    st.plotly_chart(px.histogram(df, x=cc, color=cc, title="By Country").update_layout(showlegend=False, height=350), use_container_width=True)
-    else:
-        st.info("No feedback yet.")
-
-
-# ═══════════════════════════════════════════════════
-# PAGE: PATIENT FEEDBACK
-# ═══════════════════════════════════════════════════
-def page_patient_feedback():
-    st.title("💚 Patient Feedback")
+    # ═══════════════════════════════════════
+# PAGE: MEETINGS (NEW)
+# ═══════════════════════════════════════
+def page_meetings():
     r = get_role()
-
-    # 🟢 PATIENT: sadece form
-    if r == "Patient":
-        st.write("Your voice matters.")
-
-        with st.form("pf_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-
-            with c1:
-                age = st.selectbox("Age Group", ["18-30", "31-45", "46-60", "60+"])
-                pf_country = st.selectbox("Country", ["Turkey", "Poland", "Spain", "Other"])
-                cancer = st.selectbox("Cancer Type", ["Prefer not to say", "Breast", "Lung", "Colorectal", "Prostate", "Other"])
-
-            with c2:
-                support = st.selectbox("Needed Support", [
-                    "Peer support", "Psychological support",
-                    "Reliable information", "Treatment sharing", "Community belonging"
-                ])
-                digital = st.select_slider("Digital Comfort",
-                    ["Very Low", "Low", "Medium", "High", "Very High"], "Medium")
-                language = st.multiselect("Language(s)",
-                    ["Turkish", "Polish", "Spanish", "English"])
-
-            matching = st.text_area("What matters for matching?", height=100)
-            privacy = st.text_area("Privacy expectations?", height=100)
-
-            go = st.form_submit_button("Submit", type="primary", use_container_width=True)
-
-            if go:
-                db_add_patient_feedback({
-                    "age_group": age,
-                    "country": pf_country,
-                    "cancer_type": cancer,
-                    "support_need": support,
-                    "digital_literacy": digital,
-                    "languages": ", ".join(language),
-                    "matching_preference": matching,
-                    "privacy_expectation": privacy,
-                    "content": f"{matching} | {privacy}",
-                    "category": support,
-                    "rating": 0,
-                    "submitted_by": "anonymous",
-                    "is_anonymous": True,
-                    "status": "New",
+    st.markdown("<div class='pro-header'><h1>📅 Meetings & Zoom Sessions</h1><p>Project coordination meetings, partner calls, and training sessions</p></div>", unsafe_allow_html=True)
+    
+    meetings = db_get_meetings()
+    today = date.today()
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["📅 Upcoming", "📋 All Meetings", "➕ Schedule" if r == "Admin" else "📊 Stats", "📊 Calendar View"])
+    
+    # ─── TAB 1: UPCOMING ───
+    with tab1:
+        upcoming = [m for m in meetings if str(m.get("meeting_date", "")) >= str(today)]
+        upcoming.sort(key=lambda x: (str(x.get("meeting_date", "")), str(x.get("start_time", ""))))
+        
+        if not upcoming:
+            st.markdown("""
+            <div style='text-align:center;padding:3rem;background:linear-gradient(135deg,#f0f9ff,#e0f2fe);
+            border-radius:16px;border:1px solid #bae6fd;'>
+                <h2>📭 No Upcoming Meetings</h2>
+                <p style='color:#64748b;'>All meetings have been completed or none scheduled yet.</p>
+            </div>""", unsafe_allow_html=True)
+        else:
+            for m in upcoming:
+                md = str(m.get("meeting_date", ""))
+                is_today = md == str(today)
+                card_class = "meeting-card today" if is_today else "meeting-card"
+                today_badge = "<span class='badge badge-success' style='margin-left:8px;'>TODAY</span>" if is_today else ""
+                
+                zoom_link = m.get("zoom_link", "")
+                zoom_btn = f"<a href='{zoom_link}' target='_blank' class='zoom-btn'>🎥 Join Zoom Meeting</a>" if zoom_link else "<span style='color:#94a3b8;font-size:0.85rem;'>No Zoom link yet</span>"
+                
+                zoom_id = m.get("zoom_id", "")
+                zoom_pass = m.get("zoom_passcode", "")
+                zoom_info = ""
+                if zoom_id:
+                    zoom_info += f"<br><span style='font-size:0.8rem;color:#64748b;'>Meeting ID: <code>{zoom_id}</code></span>"
+                if zoom_pass:
+                    zoom_info += f"<span style='font-size:0.8rem;color:#64748b;margin-left:1rem;'>Passcode: <code>{zoom_pass}</code></span>"
+                
+                participants = m.get("participants", '["All"]')
+                if isinstance(participants, str):
+                    try: participants = json.loads(participants)
+                    except: participants = [participants]
+                part_str = ", ".join(participants) if participants else "All"
+                
+                mt = m.get("meeting_type", "General")
+                type_colors = {"General": "#3b82f6", "Partner Call": "#10b981", "Training": "#f59e0b", 
+                              "Workshop": "#8b5cf6", "Review": "#ef4444", "Dissemination": "#ec4899"}
+                tc = type_colors.get(mt, "#64748b")
+                
+                st.markdown(f"""
+                <div class='{card_class}'>
+                    <div style='display:flex;justify-content:space-between;align-items:flex-start;'>
+                        <div style='flex:1;'>
+                            <div class='meeting-date'>
+                                📅 {md}{today_badge}
+                                <span class='badge' style='background:{tc}20;color:{tc};margin-left:8px;'>{mt}</span>
+                            </div>
+                            <div class='meeting-title'>{m.get("title", "Untitled Meeting")}</div>
+                            <div class='meeting-time'>🕐 {str(m.get("start_time",""))[:5]} — {str(m.get("end_time",""))[:5]} ({m.get("timezone","CET")})</div>
+                            <div class='meeting-meta'>
+                                👥 Participants: {part_str}
+                            </div>
+                            {f"<div style='margin-top:0.5rem;font-size:0.9rem;color:#475569;'>{m.get('description','')}</div>" if m.get("description") else ""}
+                            {f"<div style='margin-top:0.5rem;'><strong style='font-size:0.85rem;color:#1B3A5C;'>📋 Agenda:</strong><br><span style='font-size:0.85rem;color:#475569;white-space:pre-line;'>{m.get('agenda','')}</span></div>" if m.get("agenda") else ""}
+                            {zoom_info}
+                        </div>
+                        <div style='text-align:right;min-width:180px;'>
+                            {zoom_btn}
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown(f"<p style='text-align:center;color:#94a3b8;margin-top:1rem;'>Showing {len(upcoming)} upcoming meeting(s)</p>", unsafe_allow_html=True)
+    
+    # ─── TAB 2: ALL MEETINGS ───
+    with tab2:
+        if not meetings:
+            st.info("No meetings recorded yet.")
+        else:
+            st.markdown("### 📋 Complete Meeting History")
+            
+            # Filters
+            fc1, fc2, fc3 = st.columns(3)
+            with fc1:
+                mt_filter = st.multiselect("Meeting Type", ["General", "Partner Call", "Training", "Workshop", "Review", "Dissemination"], default=[])
+            with fc2:
+                status_filter = st.selectbox("Status", ["All", "Scheduled", "Completed", "Cancelled"])
+            with fc3:
+                date_range = st.selectbox("Period", ["All", "This Week", "This Month", "Past", "Future"])
+            
+            filtered = meetings.copy()
+            if mt_filter:
+                filtered = [m for m in filtered if m.get("meeting_type", "General") in mt_filter]
+            if status_filter != "All":
+                filtered = [m for m in filtered if m.get("status", "Scheduled") == status_filter]
+            if date_range == "Past":
+                filtered = [m for m in filtered if str(m.get("meeting_date", "")) < str(today)]
+            elif date_range == "Future":
+                filtered = [m for m in filtered if str(m.get("meeting_date", "")) >= str(today)]
+            elif date_range == "This Week":
+                week_end = today + timedelta(days=7)
+                filtered = [m for m in filtered if str(today) <= str(m.get("meeting_date", "")) <= str(week_end)]
+            elif date_range == "This Month":
+                month_end = today.replace(day=28) + timedelta(days=4)
+                filtered = [m for m in filtered if str(today) <= str(m.get("meeting_date", "")) <= str(month_end)]
+            
+            if filtered:
+                df_data = []
+                for m in filtered:
+                    is_past = str(m.get("meeting_date", "")) < str(today)
+                    status_icon = "✅" if m.get("status") == "Completed" else ("⏳" if not is_past else "🔘")
+                    df_data.append({
+                        "Status": status_icon,
+                        "Date": str(m.get("meeting_date", ""))[:10],
+                        "Time": f"{str(m.get('start_time',''))[:5]}–{str(m.get('end_time',''))[:5]}",
+                        "Title": m.get("title", ""),
+                        "Type": m.get("meeting_type", "General"),
+                        "Zoom": "🔗" if m.get("zoom_link") else "—",
+                        "ID": m.get("id", "")
+                    })
+                st.dataframe(pd.DataFrame(df_data), use_container_width=True, hide_index=True)
+                
+                # Admin: Mark as completed / delete
+                if r == "Admin":
+                    st.markdown("---")
+                    st.markdown("#### ⚙️ Manage Meetings")
+                    mc1, mc2 = st.columns(2)
+                    with mc1:
+                        mid_complete = st.selectbox("Mark as Completed", [f"#{m.get('id')} — {m.get('title','')}" for m in filtered if m.get("status") != "Completed"], key="complete_sel")
+                        if st.button("✅ Mark Completed", key="btn_complete"):
+                            if mid_complete:
+                                mid = int(mid_complete.split("#")[1].split(" ")[0])
+                                db_update_meeting(mid, {"status": "Completed"})
+                                st.success("Meeting marked as completed!"); st.rerun()
+                    with mc2:
+                        mid_del = st.selectbox("Delete Meeting", [f"#{m.get('id')} — {m.get('title','')}" for m in filtered], key="del_sel")
+                        if st.button("🗑️ Delete", type="secondary", key="btn_del"):
+                            if mid_del:
+                                mid = int(mid_del.split("#")[1].split(" ")[0])
+                                db_delete_meeting(mid)
+                                st.success("Meeting deleted!"); st.rerun()
+                    
+                    # Add notes/recording
+                    st.markdown("#### 📝 Meeting Notes & Recordings")
+                    past_meetings = [m for m in filtered if str(m.get("meeting_date", "")) < str(today) or m.get("status") == "Completed"]
+                    if past_meetings:
+                        sel_note = st.selectbox("Select Meeting", [f"#{m.get('id')} — {m.get('title','')}" for m in past_meetings], key="note_sel")
+                        if sel_note:
+                            mid = int(sel_note.split("#")[1].split(" ")[0])
+                            cur_m = next((m for m in past_meetings if m.get("id") == mid), {})
+                            notes = st.text_area("Meeting Notes", value=cur_m.get("notes", "") or "", height=120, key="meeting_notes_input")
+                            rec_link = st.text_input("Recording Link", value=cur_m.get("recording_link", "") or "", key="rec_link_input")
+                            if st.button("💾 Save Notes", key="btn_save_notes"):
+                                db_update_meeting(mid, {"notes": notes, "recording_link": rec_link})
+                                st.success("Notes saved!"); st.rerun()
+            else:
+                st.info("No meetings match the selected filters.")
+    
+    # ─── TAB 3: SCHEDULE NEW (Admin) / STATS (Others) ───
+    with tab3:
+        if r == "Admin":
+            st.markdown("### ➕ Schedule New Meeting")
+            with st.form("new_meeting"):
+                m_title = st.text_input("Meeting Title *", placeholder="e.g. Monthly Partner Coordination Call")
+                m_desc = st.text_area("Description", placeholder="Brief description of the meeting purpose", height=80)
+                
+                dc1, dc2, dc3 = st.columns(3)
+                with dc1:
+                    m_date = st.date_input("Date *", value=date.today() + timedelta(days=7), min_value=date.today())
+                with dc2:
+                    m_start = st.time_input("Start Time *", value=dt_time(14, 0))
+                with dc3:
+                    m_end = st.time_input("End Time *", value=dt_time(15, 0))
+                
+                zc1, zc2, zc3 = st.columns(3)
+                with zc1:
+                    m_zoom = st.text_input("Zoom Link", placeholder="https://zoom.us/j/...")
+                with zc2:
+                    m_zoom_id = st.text_input("Meeting ID", placeholder="123 456 7890")
+                with zc3:
+                    m_zoom_pass = st.text_input("Passcode", placeholder="abc123")
+                
+                tc1, tc2, tc3 = st.columns(3)
+                with tc1:
+                    m_type = st.selectbox("Meeting Type", ["General", "Partner Call", "Training", "Workshop", "Review", "Dissemination"])
+                with tc2:
+                    m_tz = st.selectbox("Timezone", ["CET", "EET", "GMT", "UTC"])
+                with tc3:
+                    m_parts = st.multiselect("Participants", ["All", "Turkey", "Poland", "Spain", "Patients", "External"], default=["All"])
+                
+                m_agenda = st.text_area("Agenda", placeholder="1. Welcome & updates\n2. Progress review\n3. Next steps\n4. Q&A", height=120)
+                
+                if st.form_submit_button("📅 Schedule Meeting", type="primary", use_container_width=True):
+                    if m_title and m_date:
+                        db_add_meeting({
+                            "title": m_title,
+                            "description": m_desc,
+                            "meeting_date": str(m_date),
+                            "start_time": str(m_start),
+                            "end_time": str(m_end),
+                            "timezone": m_tz,
+                            "zoom_link": m_zoom,
+                            "zoom_id": m_zoom_id,
+                            "zoom_passcode": m_zoom_pass,
+                            "meeting_type": m_type,
+                            "participants": json.dumps(m_parts),
+                            "agenda": m_agenda,
+                            "created_by": get_name(),
+                            "status": "Scheduled"
+                        })
+                        st.success(f"✅ Meeting '{m_title}' scheduled for {m_date}!")
+                        st.rerun()
+                    else:
+                        st.error("Title and date are required.")
+            
+            # Quick schedule templates
+            st.markdown("---")
+            st.markdown("### 🎯 Quick Templates")
+            qt1, qt2, qt3 = st.columns(3)
+            with qt1:
+                if st.button("📞 Weekly Partner Call", use_container_width=True):
+                    next_monday = today + timedelta(days=(7 - today.weekday()))
+                    db_add_meeting({
+                        "title": "Weekly Partner Coordination Call",
+                        "description": "Regular weekly sync meeting with all partners.",
+                        "meeting_date": str(next_monday),
+                        "start_time": "14:00", "end_time": "15:00",
+                        "timezone": "CET", "meeting_type": "Partner Call",
+                        "participants": json.dumps(["All"]),
+                        "agenda": "1. Status updates from each partner\n2. Blockers & issues\n3. Next week planning\n4. AOB",
+                        "created_by": get_name(), "status": "Scheduled"
+                    })
+                    st.success("Weekly call scheduled!"); st.rerun()
+            with qt2:
+                if st.button("🎓 Training Session", use_container_width=True):
+                    next_wed = today + timedelta(days=(2 - today.weekday()) % 7 + 7)
+                    db_add_meeting({
+                        "title": "AI Tools Training Session",
+                        "description": "Hands-on training on AI-powered peer mentorship tools.",
+                        "meeting_date": str(next_wed),
+                        "start_time": "10:00", "end_time": "12:00",
+                        "timezone": "CET", "meeting_type": "Training",
+                        "participants": json.dumps(["All", "Patients"]),
+                        "agenda": "1. Platform overview\n2. AI features demo\n3. Hands-on practice\n4. Q&A",
+                        "created_by": get_name(), "status": "Scheduled"
+                    })
+                    st.success("Training session scheduled!"); st.rerun()
+            with qt3:
+                if st.button("📊 Monthly Review", use_container_width=True):
+                    first_of_next = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
+                    db_add_meeting({
+                        "title": "Monthly Progress Review",
+                        "description": "Monthly review of project progress, deliverables, and budget.",
+                        "meeting_date": str(first_of_next),
+                        "start_time": "14:00", "end_time": "16:00",
+                        "timezone": "CET", "meeting_type": "Review",
+                        "participants": json.dumps(["All"]),
+                        "agenda": "1. Progress report per WP\n2. Budget review\n3. Deliverables status\n4. Risk assessment\n5. Next month plan",
+                        "created_by": get_name(), "status": "Scheduled"
+                    })
+                    st.success("Monthly review scheduled!"); st.rerun()
+        else:
+            # Stats for non-admin
+            st.markdown("### 📊 Meeting Statistics")
+            total = len(meetings)
+            completed = len([m for m in meetings if m.get("status") == "Completed"])
+            upcoming_count = len([m for m in meetings if str(m.get("meeting_date", "")) >= str(today)])
+            
+            sc1, sc2, sc3 = st.columns(3)
+            with sc1: st.markdown(f"<div class='metric-card'><div class='value'>{total}</div><div class='label'>Total Meetings</div></div>", unsafe_allow_html=True)
+            with sc2: st.markdown(f"<div class='metric-card'><div class='value'>{completed}</div><div class='label'>Completed</div></div>", unsafe_allow_html=True)
+            with sc3: st.markdown(f"<div class='metric-card'><div class='value'>{upcoming_count}</div><div class='label'>Upcoming</div></div>", unsafe_allow_html=True)
+            
+            if meetings:
+                types = {}
+                for m in meetings:
+                    t = m.get("meeting_type", "General")
+                    types[t] = types.get(t, 0) + 1
+                fig = px.pie(values=list(types.values()), names=list(types.keys()), color_discrete_sequence=px.colors.qualitative.Set2)
+                fig.update_layout(height=350, title="Meetings by Type")
+                st.plotly_chart(fig, use_container_width=True)
+    
+    # ─── TAB 4: CALENDAR VIEW ───
+    with tab4:
+        st.markdown("### 🗓️ Calendar Overview")
+        if meetings:
+            cal_data = []
+            for m in meetings:
+                md = str(m.get("meeting_date", ""))
+                try:
+                    d_obj = datetime.strptime(md[:10], "%Y-%m-%d")
+                except:
+                    continue
+                cal_data.append({
+                    "Date": d_obj,
+                    "Title": m.get("title", ""),
+                    "Type": m.get("meeting_type", "General"),
+                    "Time": f"{str(m.get('start_time',''))[:5]}",
+                    "Status": m.get("status", "Scheduled")
                 })
-                st.success("Thank you!")
-                st.balloons()
+            
+            if cal_data:
+                df_cal = pd.DataFrame(cal_data)
+                df_cal["Week"] = df_cal["Date"].dt.isocalendar().week
+                df_cal["DayOfWeek"] = df_cal["Date"].dt.day_name()
+                df_cal["Month"] = df_cal["Date"].dt.strftime("%Y-%m")
+                
+                # Timeline chart
+                fig = px.scatter(df_cal, x="Date", y="Type", color="Type", size_max=15,
+                                hover_data=["Title", "Time", "Status"],
+                                color_discrete_sequence=px.colors.qualitative.Set2)
+                fig.update_traces(marker=dict(size=14, symbol="diamond"))
+                fig.update_layout(height=400, title="Meeting Timeline", yaxis_title="", xaxis_title="")
+                # Add today line
+                fig.add_vline(x=datetime.now(), line_dash="dash", line_color="red", annotation_text="Today")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Monthly breakdown
+                monthly = df_cal.groupby("Month").size().reset_index(name="Count")
+                fig2 = px.bar(monthly, x="Month", y="Count", color_discrete_sequence=["#2ABFBF"])
+                fig2.update_layout(height=300, title="Meetings per Month")
+                st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.info("No meetings to display on calendar.")
 
-    # 🔴 ADMIN / BOARD: veri görüntüleme
-    elif r == "Admin" or st.session_state.get("can_read_patient_fb", False):
 
-        rows = db_get_patient_feedback()
+# ═══════════════════════════════════════
+# PAGE: WORK PACKAGES
+# ═══════════════════════════════════════
+def page_work_packages(wp_df):
+    r, c = get_role(), get_country()
+    st.markdown("<div class='pro-header'><h1>📦 Work Packages</h1><p>Project structure and task allocation</p></div>", unsafe_allow_html=True)
+    if len(wp_df) == 0:
+        st.info("No WP data loaded. Create data/work_packages.csv"); return
+    if r == "Partner" and c != "All":
+        wps = get_user_wps(c)
+        wp_df = wp_df[wp_df["wp_id"].isin(wps)]
+        st.info(f"Showing WPs for {FLAGS.get(c,'')} {c}: {', '.join(wps)}")
+    for _, row in wp_df.iterrows():
+        wpid = row.get("wp_id", "")
+        with st.expander(f"📦 {wpid}: {row.get('title', '')}", expanded=False):
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1: st.metric("Budget", f"€{row.get('budget_eur', 0):,.0f}")
+            with mc2: st.metric("Status", row.get("status", "Planned"))
+            with mc3: st.metric("Lead", row.get("lead_country", "TBD"))
+            if r != "Patient":
+                rc = st.columns(3)
+                for col2, cn in zip(rc, ["Turkey", "Poland", "Spain"]):
+                    with col2: st.markdown(f"{FLAGS[cn]} **{cn}**: {get_wp_role(cn, wpid)}")
+            st.markdown(f"**Description:** {row.get('description', 'N/A')}")
 
-        if rows:
-            st.subheader("📋 Patient Feedback Data")
 
-            if r != "Admin":
-                st.warning("🔒 Read-only access (board member permission).")
+# ═══════════════════════════════════════
+# PAGE: GANTT
+# ═══════════════════════════════════════
+def page_gantt(wp_df):
+    r, c = get_role(), get_country()
+    st.markdown("<div class='pro-header'><h1>📅 Gantt Chart</h1><p>Project timeline visualization</p></div>", unsafe_allow_html=True)
+    if len(wp_df) == 0 or "start_date" not in wp_df.columns: st.info("No timeline data."); return
+    df = wp_df.copy()
+    if r == "Partner" and c != "All": df = df[df["wp_id"].isin(get_user_wps(c))]
+    df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce")
+    df["end_date"] = pd.to_datetime(df["end_date"], errors="coerce")
+    df = df.dropna(subset=["start_date", "end_date"])
+    if df.empty: st.warning("No valid dates."); return
+    fig = px.timeline(df, x_start="start_date", x_end="end_date", y="wp_id", color="status",
+                      color_discrete_map={"Completed": "#10B981", "In Progress": "#3B82F6", "Planned": "#94A3B8"})
+    fig.update_yaxes(autorange="reversed"); fig.update_layout(height=400)
+    fig.add_vline(x=datetime.now(), line_dash="dash", line_color="red", annotation_text="Today")
+    st.plotly_chart(fig, use_container_width=True)
 
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+# ═══════════════════════════════════════
+# PAGE: PARTNERS
+# ═══════════════════════════════════════
+def page_partners(pf):
+    st.markdown("<div class='pro-header'><h1>🤝 Partner Organisations</h1><p>Consortium members and responsibilities</p></div>", unsafe_allow_html=True)
+    for cn, org in PARTNER_MAP.items():
+        with st.expander(f"{FLAGS[cn]} {org} — {cn}", expanded=True):
+            st.markdown(f"**Country:** {cn}")
+            st.markdown(f"**Organisation:** {org}")
+            wpm = WP_COUNTRY_MAP.get(cn, {})
+            st.markdown(f"**Lead WPs:** {', '.join(wpm.get('lead', []))}")
+            st.markdown(f"**Support WPs:** {', '.join(wpm.get('support', []))}")
+
+
+# ═══════════════════════════════════════
+# PAGE: PARTNER FEEDBACK
+# ═══════════════════════════════════════
+def page_partner_feedback():
+    r, c = get_role(), get_country()
+    st.markdown("<div class='pro-header'><h1>💬 Partner Feedback</h1><p>Submit and manage proposal feedback</p></div>", unsafe_allow_html=True)
+    
+    perm = get_permission("Partner Feedback", r)
+    if perm in ("write", "full"):
+        with st.expander("➕ Submit New Feedback", expanded=False):
+            with st.form("pfb_form"):
+                sec = st.selectbox("Section", PROPOSAL_SECTIONS)
+                fb = st.text_area("Feedback", height=120, placeholder="Your suggestions or comments...")
+                pri = st.select_slider("Priority", ["Low", "Medium", "High"], value="Medium")
+                if st.form_submit_button("📤 Submit", type="primary", use_container_width=True):
+                    if fb.strip():
+                        cn = c if r == "Partner" else "Admin"
+                        org = get_org()
+                        db_add_partner_feedback(cn, org, sec, fb.strip(), pri, get_name())
+                        st.success("✅ Feedback submitted!"); st.rerun()
+                    else: st.warning("Please write feedback.")
+    
+    fbl = db_get_partner_feedback()
+    if r == "Partner" and c != "All":
+        fbl = [f for f in fbl if f.get("partner_country", f.get("country", "")) == c or f.get("partner_country", f.get("country", "")) == "Admin"]
+    
+    if not fbl: st.info("No feedback yet."); return
+    
+    # Export buttons
+    if EXPORT_OK and r == "Admin":
+        ec1, ec2, _ = st.columns([1, 1, 4])
+        with ec1:
+            xl = generate_feedback_excel()
+            if xl: st.download_button("📥 Excel Export", xl, "oncoconnect_feedback.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with ec2:
+            pdf = generate_feedback_pdf()
+            if pdf: st.download_button("📥 PDF Report", pdf, "oncoconnect_feedback.pdf", "application/pdf", use_container_width=True)
+    
+    # Filters
+    fc1, fc2, fc3 = st.columns(3)
+    with fc1: sf = st.multiselect("Section Filter", sorted(set(f.get("section","") for f in fbl)), key="pfb_sec_f")
+    with fc2: pf2 = st.multiselect("Priority", ["High","Medium","Low"], key="pfb_pri_f")
+    with fc3: stf = st.multiselect("Status", sorted(set(f.get("status","Open") for f in fbl)), key="pfb_st_f")
+    
+    if sf: fbl = [f for f in fbl if f.get("section","") in sf]
+    if pf2: fbl = [f for f in fbl if f.get("priority","") in pf2]
+    if stf: fbl = [f for f in fbl if f.get("status","Open") in stf]
+    
+    st.markdown(f"**{len(fbl)} feedback item(s)**")
+    
+    for fb in fbl:
+        pri = fb.get("priority", "Medium")
+        bc = {"High": "badge-danger", "Medium": "badge-warning", "Low": "badge-success"}.get(pri, "badge-info")
+        sc2 = fb.get("status", "Open")
+        sbc = {"Open": "badge-info", "Accepted": "badge-success", "Rejected": "badge-danger", "In Review": "badge-warning"}.get(sc2, "badge-info")
+        fc = fb.get("partner_country", fb.get("country", ""))
+        
+        st.markdown(f"""<div class='fb-card'>
+            <div style='display:flex;justify-content:space-between;align-items:center;'>
+                <div><strong>{FLAGS.get(fc,'')} #{fb.get('id','')} — {fb.get('section','')}</strong></div>
+                <div><span class='badge {bc}'>{pri}</span> <span class='badge {sbc}'>{sc2}</span></div>
+            </div>
+            <p style='margin:0.5rem 0;color:#475569;'>{fb.get('feedback', fb.get('content',''))}</p>
+            <span style='font-size:0.8rem;color:#94a3b8;'>By {fb.get('submitted_by','')} | {str(fb.get('created_at',''))[:10]}</span>
+            {f"<div style='margin-top:0.5rem;padding:0.5rem;background:#f0fdf4;border-radius:8px;font-size:0.85rem;'><strong>Response:</strong> {fb.get('response','')}</div>" if fb.get('response') else ""}
+        </div>""", unsafe_allow_html=True)
+        
+        if r == "Admin" and sc2 == "Open":
+            uc1, uc2, uc3 = st.columns([2, 1, 1])
+            with uc1: resp = st.text_input("Response", key=f"resp_{fb.get('id')}", placeholder="Admin response...")
+            with uc2:
+                if st.button("✅ Accept", key=f"acc_{fb.get('id')}"):
+                    db_update_feedback_status(fb.get("id"), "Accepted", resp)
+                    st.rerun()
+            with uc3:
+                if st.button("❌ Reject", key=f"rej_{fb.get('id')}"):
+                    db_update_feedback_status(fb.get("id"), "Rejected", resp)
+                    st.rerun()
+
+
+# ═══════════════════════════════════════
+# PAGE: PATIENT FEEDBACK
+# ═══════════════════════════════════════
+def page_patient_feedback():
+    r = get_role()
+    st.markdown("<div class='pro-header'><h1>💚 Patient Feedback</h1><p>Patient experience and needs assessment</p></div>", unsafe_allow_html=True)
+    
+    if r == "Patient":
+        with st.form("patient_fb"):
+            st.markdown("#### Share Your Experience")
+            c1, c2 = st.columns(2)
+            with c1:
+                country = st.selectbox("Country", ["Turkey", "Poland", "Spain", "Other"])
+                age = st.selectbox("Age Group", ["18-30", "31-45", "46-60", "60+"])
+            with c2:
+                cancer = st.text_input("Cancer Type", placeholder="e.g. Breast, Lung...")
+                support = st.selectbox("Support Need", ["Emotional", "Medical Info", "Practical", "Social", "All"])
+            digital = st.select_slider("Digital Literacy", ["Low", "Medium", "High"], value="Medium")
+            matching = st.selectbox("Matching Preference", ["Same cancer type", "Same age group", "Same country", "No preference"])
+            privacy = st.selectbox("Privacy Expectation", ["Anonymous", "First name only", "Full profile OK"])
+            comments = st.text_area("Additional Comments", height=100)
+            
+            if st.form_submit_button("💚 Submit Feedback", type="primary", use_container_width=True):
+                db_add_patient_feedback({
+                    "country": country, "age_group": age, "cancer_type": cancer,
+                    "support_need": support, "digital_literacy": digital,
+                    "matching_preference": matching, "privacy_expectation": privacy,
+                    "comments": comments, "submitted_by": get_name()
+                })
+                st.success("Thank you for your valuable feedback! 💚")
+    
+    if r == "Admin" or st.session_state.get("can_read_patient_fb"):
+        pfb = db_get_patient_feedback()
+        if pfb:
+            st.subheader(f"📊 Patient Feedback ({len(pfb)} responses)")
+            df = pd.DataFrame(pfb)
+            if "support_need" in df.columns:
+                fig = px.pie(df, names="support_need", title="Support Needs", color_discrete_sequence=px.colors.qualitative.Pastel)
+                st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(df[[c for c in ["country","age_group","cancer_type","support_need","digital_literacy","matching_preference","privacy_expectation","comments","created_at"] if c in df.columns]], use_container_width=True, hide_index=True)
         else:
             st.info("No patient feedback yet.")
-            if r == "Admin" and len(rows) > 2:
-                pf_df = pd.DataFrame(rows)
-                pi1, pi2 = st.columns(2)
-                with pi1:
-                    if "support_need" in pf_df.columns:
-                        fig = px.pie(pf_df, names="support_need", title="Patient Support Needs")
-                        st.plotly_chart(fig, use_container_width=True)
-                with pi2:
-                    if "country" in pf_df.columns:
-                        fig2 = px.histogram(pf_df, x="country", color="country", title="By Country")
-                        fig2.update_layout(showlegend=False)
-                        st.plotly_chart(fig2, use_container_width=True)
-         
-            
-    elif r == "Partner":
-        st.markdown(
-            "<div style='background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);"
-            "border-radius:12px;padding:2rem;text-align:center;margin:2rem 0;'>"
-            "<h3>🔒 Patient Feedback is Confidential</h3>"
-            "<p>Only Admin and authorized board members can view this data.</p></div>",
-            unsafe_allow_html=True,
-        )
-
-
-# ═══════════════════════════════════════════════════
-# PAGE: APPROVAL STATUS
-# ═══════════════════════════════════════════════════
-def page_approval():
-    st.title("🗳️ Proposal Approval Status")
-    approvals = db_get_approvals()
-    r, c = get_role(), get_country()
-
-    # Current proposal version
-    current_version = 0
-    latest_proposal = None
-    try:
-        if SUPABASE_OK:
-            latest = sb().table("documents").select("*").eq("category", "proposal").eq("is_active", True).order("version", desc=True).limit(1).execute()
-            if latest.data:
-                current_version = latest.data[0].get("version", 0)
-                latest_proposal = latest.data[0]
-    except:
+    elif r == "Patient":
         pass
-
-    # Proposal sections completeness
-    sections = db_get_proposal_sections()
-    filled = sum(1 for s in sections if len(s.get("content", "") or "") > 50)
-    total_sec = len(sections) if sections else 12
-
-    st.info(f"📄 Proposal Version: **v{current_version}** | Sections: **{filled}/{total_sec}** filled")
-
-    cols = st.columns(3)
-    for col, cname in zip(cols, ["Turkey", "Poland", "Spain"]):
-        ok = approvals.get(cname, False)
-        org = PARTNER_MAP[cname]
-        with col:
-            (st.success if ok else st.warning)(f"{FLAGS[cname]} {org}\n\n{'✅ APPROVED' if ok else '⏳ PENDING'}")
-            can_approve = (r == "Partner" and c == cname and not ok) or (r == "Admin" and not ok)
-            if can_approve:
-                if st.button(f"✅ Approve {cname}", key=f"a_{cname}", use_container_width=True, type="primary"):
-                    db_set_approval(cname, True, get_name(), r)
-                    st.rerun()
-            if r == "Admin" and ok:
-                if st.button(f"↩️ Revoke {cname}", key=f"r_{cname}", use_container_width=True):
-                    db_set_approval(cname, False, get_name(), r)
-                    st.rerun()
-
-    st.divider()
-    n = sum(1 for v in approvals.values() if v)
-    st.progress(n / 3)
-    st.write(f"**{n}/3** approved")
-
-    if n == 3:
-        st.success("🎉 All partners approved! Proposal is final.")
-        if r == "Admin":
-            dc1, dc2, dc3 = st.columns(3)
-            with dc1:
-                if latest_proposal and SUPABASE_OK:
-                    if st.button("📥 Download Final (Storage)", type="primary", use_container_width=True):
-                        data = download_from_storage(latest_proposal["storage_path"])
-                        if data:
-                            st.download_button("⬇️ Save", data, latest_proposal["file_name"],
-                                               "application/octet-stream", key="dl_final")
-            with dc2:
-                # Export proposal sections as MD
-                if sections:
-                    md_content = "# OncoConnect Proposal\n\n"
-                    for s in sections:
-                        md_content += f"## {s['section_title']}\n\n{s.get('content', '')}\n\n"
-                    st.download_button("📥 Download Sections (.md)", md_content,
-                                       "OncoConnect_Proposal_Sections.md", "text/markdown",
-                                       use_container_width=True)
-            with dc3:
-                report = json.dumps({
-                    "project": "OncoConnect", "programme": "Erasmus+ KA210",
-                    "status": "Approved", "version": current_version,
-                    "approvals": {k: v for k, v in approvals.items()},
-                    "sections_filled": f"{filled}/{total_sec}",
-                    "exported": datetime.now().isoformat(),
-                }, indent=2)
-                st.download_button("📊 Approval Report", report, "Approval_Report.json",
-                                   "application/json", use_container_width=True)
-        else:
-            st.info("Only Admin can download.")
     else:
-        waiting = [f"{FLAGS[w]} {w}" for w, v in approvals.items() if not v]
-        st.warning(f"Waiting: {', '.join(waiting)}")
-
-    if r == "Admin":
-        st.divider()
-        st.subheader("⚙️ Admin Controls")
-        ac1, ac2 = st.columns(2)
-        with ac1:
-            if st.button("🔄 Reset All Approvals", use_container_width=True):
-                db_reset_all_approvals(get_name())
-                st.success("Approvals reset!")
-                st.rerun()
-        with ac2:
-            st.caption("Auto-reset when new proposal version is uploaded.")
-
-        log = db_get_approval_log()
-        if log:
-            st.subheader("📜 Approval Log")
-            st.dataframe(pd.DataFrame(log), use_container_width=True, hide_index=True)
-
-
-# ═══════════════════════════════════════════════════
-# PAGE: ANNOUNCEMENTS
-# ═══════════════════════════════════════════════════
-def page_announcements():
-    st.title("📢 Announcements")
-    r = get_role()
-    for a in db_get_announcements():
-        ann_card(a)
-        if r == "Admin":
-            if st.button("🗑️ Delete", key=f"del_ann_{a.get('id', '')}"):
-                if SUPABASE_OK:
-                    try:
-                        sb().table("announcements").delete().eq("id", a["id"]).execute()
-                        st.rerun()
-                    except:
-                        pass
-
-    if r in ("Admin", "Partner"):
-        st.divider()
-        with st.form("ann_form", clear_on_submit=True):
-            title = st.text_input("Title")
-            content = st.text_area("Content", height=120)
-            priority = st.select_slider("Priority", ["Low", "Medium", "High"], "Medium")
-            if st.form_submit_button("Publish", type="primary", use_container_width=True):
-                if title.strip() and content.strip():
-                    db_add_announcement(title, content, f"{get_name()} ({get_org()})", priority)
-                    st.success("Published!")
-                    st.rerun()
-
-
-# ═══════════════════════════════════════════════════
-# PAGE: DOCUMENTS
-# ═══════════════════════════════════════════════════
-def page_documents():
-    st.title("📁 Project Documents")
-    r, c = get_role(), get_country()
-    perm = get_permission("Documents", r)
-
-    t1, t2, t3, t4 = st.tabs(["📄 Files", "📤 Upload", "📜 Proposal", "💰 Budget"])
-
-    with t1:
-        if not SUPABASE_OK:
-            st.warning("Supabase not connected.")
-        else:
-            fcat = st.selectbox("Category", ["All", "proposal", "partner-doc", "deliverable", "meeting-notes", "financial", "ethics", "other"])
-            try:
-                q = sb().table("documents").select("*").eq("is_active", True).order("created_at", desc=True)
-                if fcat != "All":
-                    q = q.eq("category", fcat)
-                docs = q.execute()
-                if docs.data:
-                    for doc in docs.data:
-                        ci = {"proposal": "📜", "partner-doc": "📋", "deliverable": "📎", "meeting-notes": "📝", "financial": "💰", "ethics": "⚖️"}.get(doc.get("category", ""), "📁")
-                        mb = (doc.get("file_size", 0) or 0) / (1024 * 1024)
-                        co1, co2, co3 = st.columns([4, 1, 1])
-                        with co1:
-                            st.markdown(f"{ci} **{doc.get('file_name', '')}** · `{doc.get('category', '')}` · v{doc.get('version', 1)}")
-                            st.caption(f"{doc.get('description', '-')} · {mb:.1f}MB · By {doc.get('uploaded_by', '')} · {str(doc.get('created_at', ''))[:10]}")
-                        with co2:
-                            if st.button("📥", key=f"dl_{doc['id']}"):
-                                data = download_from_storage(doc["storage_path"])
-                                if data:
-                                    st.download_button("⬇️", data, doc["file_name"], doc.get("file_type", "application/octet-stream"), key=f"dlb_{doc['id']}")
-                        with co3:
-                            if r == "Admin":
-                                if st.button("🗑️", key=f"dd_{doc['id']}"):
-                                    delete_from_storage(doc["storage_path"])
-                                    sb().table("documents").update({"is_active": False}).eq("id", doc["id"]).execute()
-                                    st.rerun()
-                        st.markdown("---")
-                else:
-                    st.info("No files uploaded yet.")
-            except Exception as e:
-                st.error(f"Error: {e}")
-    with t2:
-        if perm in ["full", "upload"]:
-            with st.form("upload_form"):
-                st.subheader("📤 Upload File")
-                cat = st.selectbox("Category", ["proposal", "partner-doc", "deliverable", "meeting-notes", "financial", "ethics", "other"])
-                desc = st.text_input("Description")
-                ver = st.number_input("Version", min_value=1, value=1) if cat == "proposal" else 1
-                uf = st.file_uploader("Select File", type=["pdf", "docx", "xlsx", "pptx", "md", "txt", "png", "jpg"])
-                if st.form_submit_button("📤 Upload", type="primary") and uf:
-                    fb = uf.read()
-                    fs = len(fb)
-                    if cat == "proposal":
-                        sp = f"proposals/{uf.name}"
-                    elif cat == "partner-doc":
-                        folder = c.lower() if c not in ["All", "N/A"] else "admin"
-                        sp = f"partner-docs/{folder}/{uf.name}"
-                    else:
-                        sp = f"{cat}/{uf.name}"
-                    with st.spinner("Uploading..."):
-                        ok = upload_to_storage(fb, sp, uf.type or "application/octet-stream")
-                        if ok:
-                            if cat == "proposal":
-                                try:
-                                    old = sb().table("documents").select("id").eq("category", "proposal").eq("is_active", True).execute()
-                                    for o in (old.data or []):
-                                        sb().table("documents").update({"is_active": False}).eq("id", o["id"]).execute()
-                                except:
-                                    pass
-                                db_reset_all_approvals(get_name())
-                                st.warning("⚠️ New proposal version — all approvals reset!")
-                            save_document_metadata(uf.name, uf.type or "unknown", fs, cat, desc,
-                                                   st.session_state.get("username", "unknown"),
-                                                   c if c not in ["All", "N/A"] else "Admin", sp,
-                                                   ver if cat == "proposal" else 1)
-                            st.success(f"✅ '{uf.name}' uploaded!")
-                            st.rerun()
-        else:
-            st.info("📖 Read-only access.")
-
-    with t3:
-        try:
-            with open("documents/proposal_draft.md", "r", encoding="utf-8") as f:
-                st.markdown(f.read())
-                if r == "Admin":
-                    f.seek(0)
-                    st.download_button("Download", f.read(), "proposal_draft.md", "text/markdown", use_container_width=True)
-        except FileNotFoundError:
-            st.info("No local proposal file. Use Storage or Proposal Sections.")
-
-    with t4:
-        bd = pd.DataFrame({
-            "WP": ["WP1", "WP2", "WP3", "WP4", "WP5"],
-            "Name": ["Management", "Needs Analysis", "Development", "Pilot", "Evaluation"],
-            "Budget (€)": [12000, 7000, 15000, 12000, 14000],
-            "Lead": ["Turkey", "Poland", "Spain", "Turkey", "Spain"],
-        })
-        st.dataframe(bd, hide_index=True, use_container_width=True)
-        fig = px.bar(bd, x="WP", y="Budget (€)", color="Lead", text="Budget (€)",
-                     color_discrete_map={"Turkey": "#e74c3c", "Poland": "#3498db", "Spain": "#f39c12"})
-        fig.update_traces(texttemplate="€%{text:,.0f}", textposition="outside")
-        st.plotly_chart(fig, use_container_width=True)
-        st.metric("Total Budget", f"€{TOTAL_BUDGET:,.0f}")
-
-
-# ═══════════════════════════════════════════════════
-# PAGE: AI FEEDBACK INTEGRATION CENTER
-# ═══════════════════════════════════════════════════
-def page_ai_center():
-    st.title("🧠 AI Feedback Integration Center")
-    if get_role() != "Admin":
         show_access_denied()
-        return
 
-    if AI_ENABLED:
-        provider = "OpenRouter" if USE_OPENROUTER else "OpenAI"
-        st.success(f"🧠 AI Engine: **Active** — {provider} ({ai_model})")
-    else:
-        st.warning("⚠️ AI not configured. Manual mode.")
-        st.code('[openrouter]\napi_key = "sk-or-..."\nmodel = "openai/gpt-4o-mini"', language="toml")
 
-    tabs = st.tabs(["📄 Sections", "🔍 Analyze", "📝 Revision", "📜 Log", "🤖 Decisions", "📊 Insights"])
-
-    # ── TAB 1: Proposal Sections ──
-    with tabs[0]:
-        st.subheader("📄 Proposal Sections")
-        sections = db_get_proposal_sections()
-
-        if not sections:
-            st.warning("No sections found.")
-            if st.button("🔄 Create Sections"):
-                if SUPABASE_OK:
-                    for i, (key, title) in enumerate(PROPOSAL_SECTION_KEYS):
-                        try:
-                            sb().table("proposal_sections").insert({
-                                "section_key": key, "section_title": title,
-                                "section_order": i + 1, "content": "", "version": 1, "is_active": True,
-                            }).execute()
-                        except:
-                            pass
-                    st.success("Sections created!")
-                    st.rerun()
-            return
-
-        sec_opts = {s["section_key"]: f"{s['section_order']}. {s['section_title']}" for s in sections}
-        sel_key = st.selectbox("Select Section", list(sec_opts.keys()), format_func=lambda x: sec_opts[x])
-        cur = db_get_section_by_key(sel_key)
-
-        if cur:
-            st.markdown(f"**Version:** v{cur.get('version', 1)} | **Updated:** {str(cur.get('updated_at', ''))[:10]} | **By:** {cur.get('last_updated_by', '-')}")
-            content = cur.get("content", "")
-            if content:
-                st.markdown("#### Current Content:")
-                st.markdown(content)
-            else:
-                st.info("Section is empty.")
-
-            with st.expander("✏️ Edit"):
-                new_c = st.text_area("Content", value=content, height=300, key=f"edit_{sel_key}")
-                if st.button("💾 Save", key=f"save_{sel_key}"):
-                    nv = db_update_section_content(sel_key, new_c, get_name())
-                    if nv:
-                        db_log_improvement(None, sel_key, content, new_c, "Manual edit", "manual_edit", get_name())
-                        st.success(f"✅ Updated → v{nv}")
-                        st.rerun()
-
-            with st.expander("📤 Upload .md File"):
-                st.markdown("Use `## Section Title` headers in your .md file.")
-                umd = st.file_uploader("Upload .md", type=["md", "txt"], key="md_up")
-                if umd and st.button("📥 Parse & Load"):
-                    parsed = parse_proposal_md(umd.read().decode("utf-8"))
-                    if parsed:
-                        for sk, sc in parsed.items():
-                            db_update_section_content(sk, sc, get_name())
-                        st.success(f"✅ {len(parsed)} sections updated!")
-                        st.rerun()
-
+# ═══════════════════════════════════════
+# PAGE: APPROVAL STATUS
+# ═══════════════════════════════════════
+def page_approval():
+    r, c = get_role(), get_country()
+    st.markdown("<div class='pro-header'><h1>🗳️ Approval Status</h1><p>Partner approval tracking for proposal submission</p></div>", unsafe_allow_html=True)
+    
+    ap = db_get_approvals()
+    cols = st.columns(3)
+    for col, cn in zip(cols, ["Turkey", "Poland", "Spain"]):
+        with col:
+            approved = ap.get(cn, False)
+            bg = "linear-gradient(135deg,#dcfce7,#f0fdf4)" if approved else "linear-gradient(135deg,#fef9c3,#fffbeb)"
+            ic = "✅" if approved else "⏳"
+            st.markdown(f"""<div style='background:{bg};border-radius:16px;padding:2rem;text-align:center;border:1px solid {"#bbf7d0" if approved else "#fde68a"};'>
+                <div style='font-size:3rem;'>{FLAGS[cn]}</div>
+                <h3 style='margin:0.5rem 0;'>{PARTNER_MAP[cn]}</h3>
+                <div style='font-size:2rem;'>{ic}</div>
+                <p style='color:#64748b;'>{'Approved' if approved else 'Pending'}</p>
+            </div>""", unsafe_allow_html=True)
+    
+    # Approve/revoke
+    if r == "Partner" and c in PARTNER_MAP:
         st.markdown("---")
-        st.markdown("#### 📊 Overview")
-        overview = []
-        for s in sections:
-            cl = len(s.get("content", "") or "")
-            overview.append({
-                "#": s["section_order"], "Section": s["section_title"],
-                "Chars": cl, "Status": "✅" if cl > 50 else ("⚠️" if cl > 0 else "❌"),
-                "Ver": f"v{s.get('version', 1)}",
-            })
-        st.dataframe(pd.DataFrame(overview), use_container_width=True, hide_index=True)
-
-    # ── TAB 2: Feedback Analysis ──
-    with tabs[1]:
-        st.subheader("🔍 Feedback Analysis — AI Workflow")
-        all_fb = db_get_partner_feedback()
-        open_fb = [f for f in all_fb if f.get("status") == "Open"]
-
-        if not open_fb:
-            st.success("✅ All feedback processed.")
+        if ap.get(c):
+            if st.button(f"🔄 Revoke {c} Approval", type="secondary"):
+                db_set_approval(c, False, get_name(), r); st.rerun()
         else:
-            st.write(f"**{len(open_fb)} open feedback items**")
-            for fb in open_fb:
-                fb_text = fb.get("feedback", fb.get("content", ""))
-                fb_section = fb.get("section", "General")
-                fb_country = fb.get("partner_country", fb.get("country", ""))
-                fb_pri = fb.get("priority", "Medium")
-                pri_icon = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(fb_pri, "⚪")
+            if st.button(f"✅ Approve on behalf of {c}", type="primary"):
+                db_set_approval(c, True, get_name(), r); st.rerun()
+    
+    if r == "Admin":
+        st.markdown("---")
+        st.subheader("🛡️ Admin Controls")
+        ac1, ac2 = st.columns(2)
+        for col2, cn in zip(st.columns(3), ["Turkey", "Poland", "Spain"]):
+            with col2:
+                if ap.get(cn):
+                    if st.button(f"Revoke {cn}", key=f"rev_{cn}"): db_set_approval(cn, False, get_name(), "Admin"); st.rerun()
+                else:
+                    if st.button(f"Approve {cn}", key=f"apv_{cn}"): db_set_approval(cn, True, get_name(), "Admin"); st.rerun()
+        if st.button("🔄 Reset All Approvals", type="secondary"):
+            db_reset_all_approvals(get_name()); st.rerun()
+    
+    # Log
+    log = db_get_approval_log()
+    if log:
+        st.subheader("📋 Approval History")
+        st.dataframe(pd.DataFrame(log)[["action","country","performed_by","role","created_at"]].head(20), use_container_width=True, hide_index=True)
 
-                with st.expander(f"{pri_icon} #{fb['id']} — {fb_section} — {FLAGS.get(fb_country, '')} {fb_country}"):
-                    st.markdown(f"**Feedback:** {fb_text}")
-                    st.caption(f"By: {fb.get('submitted_by', '')} | Priority: {fb_pri}")
 
-                    sec_data = _find_section_for_feedback(fb_section)
-                    if sec_data and sec_data.get("content"):
-                        st.markdown("**📄 Section Content:**")
-                        st.markdown(f"<div style='background:#f8f9fa;padding:1rem;border-radius:8px;max-height:200px;overflow-y:auto;font-size:0.9rem;'>{sec_data['content'][:500]}{'...' if len(sec_data.get('content','')) > 500 else ''}</div>", unsafe_allow_html=True)
+# ═══════════════════════════════════════
+# PAGE: ANNOUNCEMENTS
+# ═══════════════════════════════════════
+def page_announcements():
+    r = get_role()
+    st.markdown("<div class='pro-header'><h1>📢 Announcements</h1><p>Project updates and important notices</p></div>", unsafe_allow_html=True)
+    
+    perm = get_permission("Announcements", r)
+    if perm in ("write", "full"):
+        with st.expander("➕ Post Announcement", expanded=False):
+            with st.form("ann_form"):
+                title = st.text_input("Title")
+                content = st.text_area("Content", height=100)
+                pri = st.select_slider("Priority", ["Low", "Medium", "High"], value="Medium")
+                if st.form_submit_button("📢 Post", type="primary"):
+                    if title and content:
+                        db_add_announcement(title, content, get_name(), pri)
+                        st.success("Posted!"); st.rerun()
+    
+    for a in db_get_announcements(): ann_card(a)
 
-                    st.markdown("---")
-                    col_ai, col_man = st.columns([2, 1])
 
-                    with col_ai:
-                        if st.button("🧠 AI Analyze", key=f"ai_{fb['id']}", type="primary"):
-                            sc = sec_data.get("content", "") if sec_data else ""
-                            sk = sec_data.get("section_key", fb_section) if sec_data else fb_section
-                            with st.spinner("Analyzing..."):
-                                result = ai_analyze_feedback_v2(fb_text, sk, sc)
-                            st.session_state[f"air_{fb['id']}"] = result
+# ═══════════════════════════════════════
+# PAGE: DOCUMENTS
+# ═══════════════════════════════════════
+def page_documents():
+    r = get_role()
+    st.markdown("<div class='pro-header'><h1>📁 Document Center</h1><p>Project files and deliverables</p></div>", unsafe_allow_html=True)
+    
+    if not SUPABASE_OK:
+        st.warning("Document storage requires Supabase connection."); return
+    
+    perm = get_permission("Documents", r)
+    if perm in ("upload", "full"):
+        with st.expander("📤 Upload Document"):
+            cat = st.selectbox("Category", ["Proposal Draft", "Meeting Minutes", "Budget", "Research", "Deliverable", "Template", "Other"])
+            desc = st.text_input("Description")
+            uf = st.file_uploader("File", type=["pdf","docx","xlsx","pptx","png","jpg","csv","md","txt"])
+            if uf and st.button("📤 Upload", type="primary"):
+                sp = f"documents/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uf.name}"
+                if upload_to_storage(uf.getvalue(), sp, uf.type or "application/octet-stream"):
+                    save_document_metadata(uf.name, uf.type, uf.size, cat, desc, get_name(), get_country(), sp)
+                    st.success(f"✅ Uploaded: {uf.name}"); st.rerun()
+    
+    try:
+        docs = sb().table("documents").select("*").eq("is_active", True).order("created_at", desc=True).execute().data or []
+        if docs:
+            st.subheader(f"📄 Documents ({len(docs)})")
+            for d in docs:
+                with st.expander(f"📄 {d.get('file_name','')} — {d.get('category','')}"):
+                    st.markdown(f"**Category:** {d.get('category','')} | **By:** {d.get('uploaded_by','')} | **Date:** {str(d.get('created_at',''))[:10]}")
+                    if d.get("description"): st.markdown(f"*{d['description']}*")
+                    dc1, dc2 = st.columns(2)
+                    with dc1:
+                        data = download_from_storage(d.get("storage_path", ""))
+                        if data: st.download_button("📥 Download", data, d.get("file_name","file"), use_container_width=True)
+                    if r == "Admin":
+                        with dc2:
+                            if st.button("🗑️ Delete", key=f"del_doc_{d.get('id')}"):
+                                delete_from_storage(d.get("storage_path", ""))
+                                sb().table("documents").update({"is_active": False}).eq("id", d["id"]).execute()
+                                st.success("Deleted!"); st.rerun()
+        else: st.info("No documents uploaded yet.")
+    except Exception as e: st.error(f"Error loading documents: {e}")
 
-                    rk = f"air_{fb['id']}"
-                    if rk in st.session_state:
-                        res = st.session_state[rk]
-                        dec = res.get("decision", "manual_review")
-                        conf = res.get("confidence", 0)
-                        reas = res.get("reasoning", "")
-                        sugg = res.get("suggested_text", "")
-                        tgt = res.get("target_section", "")
-                        pri_ai = res.get("priority", "medium")
-                        awp = res.get("affected_wp", "")
-                        eras = res.get("erasmus_criteria", {})
 
-                        st.markdown("### 🤖 AI Result")
-                        bmap = {
-                            "integrate": ("✅ INTEGRATE", "success"), "revise": ("📝 REVISE", "info"),
-                            "route": ("🔀 ROUTE", "warning"), "archive": ("📦 ARCHIVE", "info"),
-                            "reject": ("❌ REJECT", "error"), "ethical_risk": ("⚠️ ETHICAL RISK", "error"),
-                        }
-                        lbl, bt = bmap.get(dec, ("👁️ MANUAL REVIEW", "warning"))
-                        getattr(st, bt)(f"**{lbl}** — Confidence: {conf:.0%}")
-                        st.write(f"**Reasoning:** {reas}")
-                        if awp:
-                            st.write(f"**Affected WP:** {awp}")
-                        if dec == "route" and tgt:
-                            st.warning(f"🔀 Should route to **{tgt}**")
-
-                        # Erasmus criteria
-                        if eras:
-                            st.markdown("**Erasmus+ Criteria:**")
-                            cr_labels = {"relevance": "📋", "methodology": "🔬", "partnership": "🤝",
-                                        "impact": "💥", "inclusion": "♿", "digital": "💻", "sustainability": "🌱"}
-                            cr_cols = st.columns(7)
-                            for i, (ck, ci) in enumerate(cr_labels.items()):
-                                with cr_cols[i]:
-                                    st.write(f"{'✅' if eras.get(ck) else '❌'}")
-                                    st.caption(ck[:6])
-
-                        # Suggested text
-                        if sugg and dec in ("integrate", "revise"):
-                            st.markdown("### 📝 AI Suggestion")
-                            if sec_data and sec_data.get("content"):
-                                d1, d2 = st.columns(2)
-                                with d1:
-                                    st.markdown("**Current:**")
-                                    st.text_area("", sec_data["content"][:1000], height=200, disabled=True, key=f"old_{fb['id']}")
-                                with d2:
-                                    st.markdown("**AI Suggestion:**")
-                                    st.text_area("", sugg, height=200, disabled=True, key=f"new_{fb['id']}")
-                            else:
-                                st.text_area("**AI Suggestion:**", sugg, height=200, disabled=True, key=f"new_{fb['id']}")
-
-                        # Action buttons
-                        st.markdown("### ⚡ Decision")
-                        a1, a2, a3, a4, a5 = st.columns(5)
-                        with a1:
-                            if dec in ("integrate", "revise") and sugg:
-                                if st.button("✅ Accept & Update", key=f"acc_{fb['id']}", type="primary"):
-                                    sk2 = sec_data["section_key"] if sec_data else fb_section
-                                    old_c = sec_data.get("content", "") if sec_data else ""
-                                    new_c = (old_c + "\n\n" + sugg) if (dec == "integrate" and old_c) else sugg
-                                    nv = db_update_section_content(sk2, new_c, get_name(), fb["id"])
-                                    db_update_feedback_status(fb["id"], "Accepted", f"AI {dec}: {reas}")
-                                    db_log_ai_decision(fb["id"], dec, conf, reas, tgt or sk2)
-                                    db_log_improvement(fb["id"], sk2, old_c, new_c, reas, dec, get_name())
-                                    db_reset_all_approvals(get_name())
-                                    st.success(f"✅ Updated → v{nv} | Approvals reset!")
-                                    st.rerun()
-                        with a2:
-                            if st.button("📝 Edit & Accept", key=f"ea_{fb['id']}"):
-                                st.session_state[f"em_{fb['id']}"] = True
-                        with a3:
-                            if st.button("🔀 Route", key=f"rt_{fb['id']}"):
-                                if SUPABASE_OK:
-                                    sb().table("partner_feedback").update({
-                                        "routed_to_section": tgt or fb_section, "status": "Routed",
-                                        "ai_decision": "route", "ai_confidence": conf,
-                                    }).eq("id", fb["id"]).execute()
-                                db_log_ai_decision(fb["id"], "route", conf, reas, tgt or fb_section)
-                                st.success(f"🔀 Routed to {tgt or fb_section}")
-                                st.rerun()
-                        with a4:
-                            if st.button("📦 Archive", key=f"ar_{fb['id']}"):
-                                db_update_feedback_status(fb["id"], "Archived", f"AI: {reas}")
-                                db_log_ai_decision(fb["id"], "archive", conf, reas, tgt or fb_section)
-                                st.rerun()
-                        with a5:
-                            if st.button("❌ Reject", key=f"rj_{fb['id']}"):
-                                db_update_feedback_status(fb["id"], "Rejected", f"AI: {reas}")
-                                db_log_ai_decision(fb["id"], "reject", conf, reas, fb_section)
-                                st.rerun()
-
-                        # Edit mode
-                        if st.session_state.get(f"em_{fb['id']}", False):
-                            st.markdown("### ✏️ Edit & Apply")
-                            edited = st.text_area("Edit AI suggestion:", value=sugg or "", height=200, key=f"ed_{fb['id']}")
-                            if st.button("💾 Save & Apply", key=f"se_{fb['id']}"):
-                                sk2 = sec_data["section_key"] if sec_data else fb_section
-                                old_c = sec_data.get("content", "") if sec_data else ""
-                                new_c = (old_c + "\n\n" + edited) if old_c else edited
-                                nv = db_update_section_content(sk2, new_c, get_name(), fb["id"])
-                                db_update_feedback_status(fb["id"], "Accepted", f"Edited: {reas}")
-                                db_log_ai_decision(fb["id"], "integrate", conf, reas, tgt or sk2)
-                                db_log_improvement(fb["id"], sk2, old_c, new_c, f"Edited. AI: {reas}", "manual_integrate", get_name())
-                                db_reset_all_approvals(get_name())
-                                st.session_state[f"em_{fb['id']}"] = False
-                                st.success(f"✅ Updated → v{nv}")
-                                st.rerun()
-
-                    with col_man:
-                        st.markdown("**Manual:**")
-                        ms = st.selectbox("Status", ["Open", "Under Review", "Accepted", "Rejected", "Archived", "Routed"], key=f"ms_{fb['id']}")
-                        mr = st.text_input("Response", key=f"mr_{fb['id']}")
-                        if st.button("Update", key=f"mu_{fb['id']}"):
-                            db_update_feedback_status(fb["id"], ms, mr if mr else None)
-                            st.rerun()
-
-            st.markdown("---")
-            if st.button("🧠 Bulk Analyze All", type="primary"):
-                prog = st.progress(0)
-                results = []
-                for i, fb in enumerate(open_fb):
-                    ft = fb.get("feedback", fb.get("content", ""))
-                    fs = fb.get("section", "General")
-                    sd = _find_section_for_feedback(fs)
+# ═══════════════════════════════════════
+# PAGE: AI CENTER
+# ═══════════════════════════════════════
+def page_ai_center():
+    st.markdown("<div class='pro-header'><h1>🧠 AI Decision Center</h1><p>AI-powered feedback analysis and proposal improvement</p></div>", unsafe_allow_html=True)
+    
+    if not AI_ENABLED:
+        st.warning("AI engine not configured. Add OpenRouter or OpenAI API key to secrets."); return
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["🔍 Analyze Feedback", "✍️ Section Revision", "📊 AI Decisions Log", "📋 Improvement Log"])
+    
+    with tab1:
+        fbl = db_get_partner_feedback()
+        open_fb = [f for f in fbl if f.get("status") == "Open"]
+        if not open_fb: st.info("No open feedback to analyze."); return
+        
+        sel = st.selectbox("Select Feedback", [f"#{f.get('id')} [{f.get('section','')}] {f.get('feedback', f.get('content',''))[:80]}..." for f in open_fb])
+        if sel:
+            idx = int(sel.split("#")[1].split(" ")[0])
+            fb = next((f for f in open_fb if f.get("id") == idx), None)
+            if fb and st.button("🧠 Analyze with AI", type="primary"):
+                with st.spinner("AI analyzing..."):
+                    sec = fb.get("section", "")
+                    sd = _find_section_for_feedback(sec)
                     sc = sd.get("content", "") if sd else ""
-                    sk = sd.get("section_key", fs) if sd else fs
-                    with st.spinner(f"#{fb['id']}..."):
-                        r2 = ai_analyze_feedback_v2(ft, sk, sc)
-                        results.append({"id": fb["id"], "section": fs, **r2})
-                        db_log_ai_decision(fb["id"], r2.get("decision", "manual_review"),
-                                           r2.get("confidence", 0), r2.get("reasoning", ""),
-                                           r2.get("target_section", sk))
-                    prog.progress((i + 1) / len(open_fb))
-                st.success(f"✅ {len(results)} analyzed!")
-                if results:
-                    rdf = pd.DataFrame(results)
-                    dcols = [c for c in ["id", "section", "decision", "confidence", "priority", "reasoning"] if c in rdf.columns]
-                    st.dataframe(rdf[dcols], use_container_width=True, hide_index=True)
+                    result = ai_analyze_feedback_v2(fb.get("feedback", fb.get("content", "")), sec, sc)
+                    
+                    st.json(result)
+                    db_log_ai_decision(fb.get("id"), result.get("decision",""), result.get("confidence",0), result.get("reasoning",""), result.get("target_section",""))
+                    
+                    if result.get("decision") == "integrate" and result.get("suggested_text"):
+                        st.markdown("### 📝 Suggested Revision")
+                        st.markdown(result["suggested_text"])
+                        if st.button("✅ Apply to Proposal"):
+                            sk = sd.get("section_key", sec) if sd else sec
+                            nv = db_update_section_content(sk, result["suggested_text"], "AI Engine", fb.get("id"))
+                            db_log_improvement(fb.get("id"), sec, sc, result["suggested_text"], result.get("reasoning",""), "ai_integrate", "AI Engine")
+                            db_update_feedback_status(fb.get("id"), "Accepted", f"AI integrated (v{nv})")
+                            st.success(f"Applied! Section updated to v{nv}"); st.rerun()
+    
+    with tab2:
+        st.markdown("### ✍️ Generate Section Revision")
+        sections = db_get_proposal_sections()
+        if not sections: st.info("No proposal sections loaded."); return
+        sk_sel = st.selectbox("Section", [f"{s.get('section_key')} — {s.get('section_title','')}" for s in sections])
+        if sk_sel:
+            sk = sk_sel.split(" — ")[0]
+            sd = db_get_section_by_key(sk)
+            if sd:
+                st.text_area("Current Content", sd.get("content", ""), height=150, disabled=True)
+                fb_input = st.text_area("Feedback / Instruction", height=80, placeholder="What should be improved?")
+                if fb_input and st.button("✍️ Generate Revision", type="primary"):
+                    with st.spinner("AI writing..."):
+                        revised = ai_generate_section_revision(sk, sd.get("content", ""), fb_input)
+                        st.markdown("### Revised Version")
+                        st.markdown(revised)
+                        if st.button("✅ Apply Revision"):
+                            nv = db_update_section_content(sk, revised, "AI Engine")
+                            db_log_improvement(None, sd.get("section_title",""), sd.get("content",""), revised, fb_input, "ai_revision", "AI Engine")
+                            st.success(f"Applied v{nv}!"); st.rerun()
+    
+    with tab3:
+        decisions = db_get_ai_decisions()
+        if decisions:
+            st.dataframe(pd.DataFrame(decisions).head(50), use_container_width=True, hide_index=True)
+        else: st.info("No AI decisions yet.")
+    
+    with tab4:
+        imps = db_get_improvement_log()
+        if imps:
+            st.dataframe(pd.DataFrame(imps).head(50), use_container_width=True, hide_index=True)
+        else: st.info("No improvements logged yet.")
 
-    # ── TAB 3: Revision Engine ──
-    with tabs[2]:
-        st.subheader("📝 AI Revision Engine")
+
+# ═══════════════════════════════════════
+# PAGE: ADMIN PANEL
+# ═══════════════════════════════════════
+def page_admin():
+    st.markdown("<div class='pro-header'><h1>🛡️ Admin Panel</h1><p>System administration and proposal management</p></div>", unsafe_allow_html=True)
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📝 Proposal Sections", "📥 Import Proposal", "📤 Export"])
+    
+    with tab1:
+        st.markdown("### System Status")
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        with sc1: st.metric("Database", "Connected" if SUPABASE_OK else "Local")
+        with sc2: st.metric("AI Engine", "Active" if AI_ENABLED else "Inactive")
+        with sc3: st.metric("Export", "Ready" if EXPORT_OK else "Unavailable")
+        with sc4: st.metric("Role", get_role())
+        
+        ap = db_get_approvals()
+        fbc = len(db_get_partner_feedback())
+        pfbc = len(db_get_patient_feedback())
+        mc = len(db_get_meetings())
+        
+        st.markdown("### Data Summary")
+        dc1, dc2, dc3, dc4 = st.columns(4)
+        with dc1: st.metric("Partner Feedback", fbc)
+        with dc2: st.metric("Patient Feedback", pfbc)
+        with dc3: st.metric("AI Decisions", len(db_get_ai_decisions()))
+        with dc4: st.metric("Meetings", mc)
+    
+    with tab2:
         sections = db_get_proposal_sections()
         if sections:
-            smap = {s["section_key"]: s for s in sections}
-            sopts = {s["section_key"]: f"{s['section_order']}. {s['section_title']}" for s in sections}
-            rs = st.selectbox("Section", list(sopts.keys()), format_func=lambda x: sopts[x], key="rev_sec")
-            cur = smap.get(rs, {})
-            cc = cur.get("content", "")
-            if cc:
-                st.text_area("Current:", cc, height=200, disabled=True, key="rc")
-            else:
-                st.info("Empty section.")
-            instr = st.text_area("Revision instruction / feedback", height=100, placeholder="E.g. 'Add patient experience metrics'")
-            if st.button("🧠 AI Revise", type="primary"):
-                if instr:
-                    with st.spinner("Revising..."):
-                        revised = ai_generate_section_revision(rs, cc, instr)
-                    st.session_state["rev_result"] = {"key": rs, "old": cc, "new": revised, "instr": instr}
-                else:
-                    st.warning("Enter instruction.")
-
-            if "rev_result" in st.session_state and st.session_state["rev_result"]["key"] == rs:
-                rv = st.session_state["rev_result"]
-                st.markdown("---")
-                rc1, rc2 = st.columns(2)
-                with rc1:
-                    st.markdown("**🔴 OLD:**")
-                    st.text_area("", rv["old"] or "[Empty]", height=300, disabled=True, key="ro")
-                with rc2:
-                    st.markdown("**🟢 NEW:**")
-                    edited_rev = st.text_area("", rv["new"], height=300, key="rn")
-                br1, br2 = st.columns(2)
-                with br1:
-                    if st.button("✅ Accept & Save", type="primary", key="ra"):
-                        nv = db_update_section_content(rs, edited_rev, get_name())
-                        db_log_improvement(None, rs, rv["old"], edited_rev, f"AI revision: {rv['instr']}", "ai_revision", get_name())
-                        db_reset_all_approvals(get_name())
-                        del st.session_state["rev_result"]
-                        st.success(f"✅ Updated → v{nv} | Approvals reset!")
-                        st.rerun()
-                with br2:
-                    if st.button("❌ Cancel", key="rx"):
-                        del st.session_state["rev_result"]
-                        st.rerun()
-
-    # ── TAB 4: Improvement Log ──
-    with tabs[3]:
-        st.subheader("📜 Improvement Log")
-        log = db_get_improvement_log()
-        if log:
-            ldf = pd.DataFrame(log)
-            st.dataframe(ldf, use_container_width=True, hide_index=True)
-            l1, l2 = st.columns(2)
-            with l1:
-                if "action" in ldf.columns:
-                    st.plotly_chart(px.pie(ldf, names="action", title="Actions"), use_container_width=True)
-            with l2:
-                if "section" in ldf.columns:
-                    st.plotly_chart(px.histogram(ldf, x="section", title="By Section").update_layout(showlegend=False), use_container_width=True)
+            for s in sections:
+                with st.expander(f"📄 {s.get('section_title','')} (v{s.get('version',1)})"):
+                    new_content = st.text_area("Content", s.get("content",""), height=200, key=f"sec_{s.get('section_key')}")
+                    if st.button("💾 Save", key=f"save_{s.get('section_key')}"):
+                        nv = db_update_section_content(s["section_key"], new_content, get_name())
+                        st.success(f"Saved v{nv}!"); st.rerun()
         else:
-            st.info("No logs yet.")
-
-    # ── TAB 5: AI Decisions ──
-    with tabs[4]:
-        st.subheader("🤖 AI Decision History")
-        decs = db_get_ai_decisions()
-        if decs:
-            ddf = pd.DataFrame(decs)
-            st.dataframe(ddf, use_container_width=True, hide_index=True)
-            d1, d2, d3 = st.columns(3)
-            with d1:
-                if "decision" in ddf.columns:
-                    st.plotly_chart(px.pie(ddf, names="decision", title="Decisions",
-                                          color_discrete_map={"integrate": "#28a745", "revise": "#17a2b8", "archive": "#6c757d",
-                                                              "route": "#ffc107", "reject": "#dc3545", "ethical_risk": "#ff6b6b"}), use_container_width=True)
-            with d2:
-                if "confidence" in ddf.columns:
-                    st.plotly_chart(px.histogram(ddf, x="confidence", nbins=10, title="Confidence"), use_container_width=True)
-            with d3:
-                if "target_section" in ddf.columns:
-                    st.plotly_chart(px.histogram(ddf, x="target_section", title="By Section").update_layout(showlegend=False), use_container_width=True)
-            s1, s2, s3, s4 = st.columns(4)
-            s1.metric("Total", len(ddf))
-            if "confidence" in ddf.columns:
-                s2.metric("Avg Conf", f"{ddf['confidence'].mean():.0%}")
-            if "decision" in ddf.columns:
-                s3.metric("Integrated", len(ddf[ddf["decision"].isin(["integrate", "revise"])]))
-                s4.metric("Rejected", len(ddf[ddf["decision"] == "reject"]))
+            st.info("No proposal sections. Import a proposal below.")
+    
+    with tab3:
+        st.markdown("### 📥 Import Proposal from Markdown")
+        md_text = st.text_area("Paste full proposal markdown", height=300, placeholder="## Project Summary\n...\n## Problem Analysis\n...")
+        if md_text and st.button("📥 Parse & Import", type="primary"):
+            parsed = parse_proposal_md(md_text)
+            if parsed:
+                for sk, content in parsed.items():
+                    st.markdown(f"**{sk}**: {len(content)} chars")
+                if st.button("✅ Confirm Import"):
+                    for sk, content in parsed.items():
+                        title = sk.replace("_", " ").title()
+                        if SUPABASE_OK:
+                            try:
+                                sb().table("proposal_sections").upsert({
+                                    "section_key": sk, "section_title": title,
+                                    "content": content, "version": 1,
+                                    "last_updated_by": get_name(), "is_active": True
+                                }).execute()
+                            except: pass
+                    st.success(f"Imported {len(parsed)} sections!"); st.rerun()
+            else: st.warning("Could not parse sections. Use ## headings.")
+    
+    with tab4:
+        st.markdown("### 📤 Export Data")
+        if EXPORT_OK:
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                xl = generate_feedback_excel()
+                if xl:
+                    st.download_button("📥 Full Feedback Excel", xl, f"oncoconnect_feedback_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            with ec2:
+                pdf = generate_feedback_pdf()
+                if pdf:
+                    st.download_button("📥 Full Feedback PDF", pdf, f"oncoconnect_report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                      "application/pdf", use_container_width=True)
+            
+            # Meeting export
+            st.markdown("---")
+            st.markdown("### 📅 Meeting Export")
+            meetings = db_get_meetings()
+            if meetings:
+                mdf = pd.DataFrame(meetings)
+                csv = mdf.to_csv(index=False).encode("utf-8")
+                st.download_button("📥 Meetings CSV", csv, "meetings_export.csv", "text/csv", use_container_width=True)
         else:
-            st.info("No AI decisions yet.")
-
-    # ── TAB 6: Insights ──
-    with tabs[5]:
-        st.subheader("📊 Insights")
-        afb = db_get_partner_feedback()
-        pfb = db_get_patient_feedback()
-        if not afb and not pfb:
-            st.info("No data.")
-        else:
-            st.write(f"**{len(afb)}** partner | **{len(pfb)}** patient feedback")
-            if st.button("🧠 Generate Summary", type="primary"):
-                with st.spinner("Summarizing..."):
-                    st.session_state["ai_summary"] = ai_generate_summary(afb)
-            if "ai_summary" in st.session_state:
-                st.markdown("### Summary")
-                st.markdown(st.session_state["ai_summary"])
-            if afb:
-                fdf = pd.DataFrame(afb)
-                i1, i2 = st.columns(2)
-                with i1:
-                    if "section" in fdf.columns:
-                        st.markdown("**Top Sections:**")
-                        for s, n in fdf["section"].value_counts().head(5).items():
-                            st.write(f"- {s}: {n}")
-                with i2:
-                    if "priority" in fdf.columns:
-                        for p, n in fdf["priority"].value_counts().items():
-                            st.write(f"- {'🔴' if p == 'High' else '🟡' if p == 'Medium' else '🟢'} {p}: {n}")
-                if "status" in fdf.columns:
-                    sc = fdf["status"].value_counts()
-                    st.plotly_chart(px.funnel(x=sc.values, y=sc.index, title="Pipeline"), use_container_width=True)
+            st.warning("Install openpyxl and fpdf2 for export functionality.")
 
 
-# ═══════════════════════════════════════════════════
-# PAGE: ADMIN PANEL
-# ═══════════════════════════════════════════════════
-def page_admin():
-    st.title("🛡️ Admin Panel")
-    if get_role() != "Admin":
-        show_access_denied()
-        return
-
-    t1, t2, t3, t4 = st.tabs(["📊 Overview", "🗃️ Data", "📤 Export", "🛠️ System"])
-
-    with t1:
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
-        m1.metric("Feedback", len(db_get_partner_feedback()))
-        m2.metric("Patient FB", len(db_get_patient_feedback()))
-        m3.metric("AI Decisions", len(db_get_ai_decisions()))
-        m4.metric("Improvements", len(db_get_improvement_log()))
-        ap = db_get_approvals()
-        m5.metric("Approvals", f"{sum(1 for v in ap.values() if v)}/3")
-        try:
-            dc = len(sb().table("documents").select("id").eq("is_active", True).execute().data or []) if SUPABASE_OK else 0
-        except:
-            dc = 0
-        m6.metric("Documents", dc)
-
-        st.subheader("⚡ System")
-        s1, s2, s3, s4 = st.columns(4)
-        with s1:
-            (st.success if SUPABASE_OK else st.warning)(f"DB: {'Connected' if SUPABASE_OK else 'Local'}")
-        with s2:
-            prov = f"{'OpenRouter' if USE_OPENROUTER else 'OpenAI'} ({ai_model})" if AI_ENABLED else "Inactive"
-            (st.success if AI_ENABLED else st.warning)(f"AI: {prov}")
-        with s3:
-            try:
-                uc = len(sb().table("app_users").select("id").eq("is_active", True).execute().data or []) if SUPABASE_OK else len(USERS_DB)
-            except:
-                uc = len(USERS_DB)
-            st.info(f"Users: {uc}")
-        with s4:
-            secs = db_get_proposal_sections()
-            filled = sum(1 for s in secs if len(s.get("content", "") or "") > 50)
-            st.info(f"Sections: {filled}/{len(secs)}")
-
-        # Permission matrix
-        st.subheader("🔒 Permission Matrix")
-        mx = []
-        for pg, roles in PAGE_PERMISSIONS.items():
-            row = {"Page": pg}
-            for rn in ["Admin", "Partner", "Patient"]:
-                pm = roles.get(rn, "none")
-                row[rn] = {"full": "✅", "read": "👁️", "write": "✍️", "filtered": "🔒", "own": "🔒", "upload": "📤", "none": "❌"}.get(pm, pm)
-            mx.append(row)
-        st.dataframe(pd.DataFrame(mx), use_container_width=True, hide_index=True)
-
-        st.subheader("📋 WP Access Matrix")
-        wm = []
-        for wp in ["WP1", "WP2", "WP3", "WP4", "WP5"]:
-            row = {"WP": wp}
-            for cn in ["Turkey", "Poland", "Spain"]:
-                row[f"{FLAGS[cn]} {cn}"] = get_wp_role(cn, wp)
-            wm.append(row)
-        st.dataframe(pd.DataFrame(wm), use_container_width=True, hide_index=True)
-
-    with t2:
-        if SUPABASE_OK:
-            tables = ["app_users", "documents", "partner_feedback", "patient_feedback", "approvals",
-                       "approval_log", "announcements", "improvement_log", "ai_decisions", "proposal_sections"]
-            sel = st.selectbox("Table", tables)
-            if st.button("📋 Load"):
-                try:
-                    res = sb().table(sel).select("*").order("created_at", desc=True).limit(50).execute()
-                    if res.data:
-                        df = pd.DataFrame(res.data)
-                        if "password_hash" in df.columns:
-                            df["password_hash"] = "****"
-                        st.dataframe(df, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("Empty.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-    with t3:
-        export = {
-            "project": "OncoConnect", "programme": "Erasmus+ KA210",
-            "exported_at": datetime.now().isoformat(),
-            "system": {"supabase": SUPABASE_OK, "ai": AI_ENABLED, "model": ai_model},
-            "approvals": db_get_approvals(), "approval_log": db_get_approval_log(),
-            "partner_feedback": db_get_partner_feedback(), "patient_feedback": db_get_patient_feedback(),
-            "ai_decisions": db_get_ai_decisions(), "improvement_log": db_get_improvement_log(),
-            "announcements": db_get_announcements(),
-        }
-        st.download_button("📥 Export All (JSON)",
-                           json.dumps(export, indent=2, ensure_ascii=False, default=str),
-                           "oncoconnect_export.json", "application/json",
-                           use_container_width=True, type="primary")
-
-    with t4:
-        st.warning("⚠️ Irreversible actions!")
-        r1, r2, r3 = st.columns(3)
-        with r1:
-            if st.button("🔄 Reset Approvals", use_container_width=True):
-                db_reset_all_approvals(get_name())
-                st.success("Reset!")
-                st.rerun()
-        with r2:
-            if st.button("🗑️ Archive Resolved", use_container_width=True):
-                if SUPABASE_OK:
-                    try:
-                        rv = sb().table("partner_feedback").select("id").eq("status", "Resolved").execute()
-                        for ri in (rv.data or []):
-                            sb().table("partner_feedback").update({"status": "Archived"}).eq("id", ri["id"]).execute()
-                        st.success(f"{len(rv.data or [])} archived.")
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-        with r3:
-            st.json({
-                "supabase": SUPABASE_OK, "ai": AI_ENABLED,
-                "provider": "OpenRouter" if USE_OPENROUTER else "OpenAI" if AI_ENABLED else "None",
-                "model": ai_model, "deadline": SUBMISSION_DEADLINE.isoformat(),
-                "budget": TOTAL_BUDGET, "bucket": BUCKET,
-            })
-
-
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════
 # PAGE: USER MANAGEMENT
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════
 def page_user_management():
-    st.title("👥 User Management")
-    if get_role() != "Admin":
-        show_access_denied()
-        return
+    st.markdown("<div class='pro-header'><h1>👥 User Management</h1><p>Manage platform users and permissions</p></div>", unsafe_allow_html=True)
+    
     if not SUPABASE_OK:
-        st.warning("Requires Supabase.")
-        for un, ud in USERS_DB.items():
-            st.write(f"**{un}** — {ud['name']} ({ud['role']}) — {ud['country']}")
+        st.info("User management requires Supabase. Showing built-in users.")
+        df = pd.DataFrame([{"Username": k, "Name": v["name"], "Role": v["role"], "Country": v["country"], "Org": v["org"]} for k, v in USERS_DB.items()])
+        st.dataframe(df, use_container_width=True, hide_index=True)
         return
-
-    t1, t2 = st.tabs(["📋 Users", "➕ New User"])
-
-    with t1:
-        try:
-            users = sb().table("app_users").select("*").order("created_at", desc=True).execute()
-            if users.data:
-                for u in users.data:
-                    ai = "🟢" if u["is_active"] else "🔴"
-                    ri = {"Admin": "🛡️", "Partner": "🤝", "Patient": "💚"}.get(u["role"], "👤")
-                    fl = FLAGS.get(u.get("country", ""), "")
-                    c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
-                    with c1:
-                        st.markdown(f"{ai} **{u['display_name']}** (`{u['username']}`) {fl} {u.get('organisation', '')}")
-                    with c2:
-                        st.write(f"{ri} {u['role']}")
-                    with c3:
-                        st.caption(f"PFB: {'✅' if u.get('can_read_patient_fb') else '❌'}")
-                    with c4:
-                        if u["username"] != "admin":
-                            ns = not u["is_active"]
-                            if st.button("🔴" if u["is_active"] else "🟢", key=f"tg_{u['id']}"):
-                                sb().table("app_users").update({"is_active": ns}).eq("id", u["id"]).execute()
-                                st.rerun()
-
-                    with st.expander(f"✏️ Edit: {u['username']}"):
-                        with st.form(f"ed_{u['id']}"):
-                            nd = st.text_input("Name", value=u["display_name"], key=f"dn_{u['id']}")
-                            nr = st.selectbox("Role", ["Admin", "Partner", "Patient"],
-                                              index=["Admin", "Partner", "Patient"].index(u["role"]), key=f"rl_{u['id']}")
-                            nc = st.selectbox("Country", ["All", "Turkey", "Poland", "Spain", "N/A"],
-                                              index=["All", "Turkey", "Poland", "Spain", "N/A"].index(u.get("country", "N/A")), key=f"ct_{u['id']}")
-                            no = st.text_input("Org", value=u.get("organisation", ""), key=f"og_{u['id']}")
-                            np = st.checkbox("Patient FB Read", value=u.get("can_read_patient_fb", False), key=f"pf_{u['id']}")
-                            nw = st.text_input("New Password (blank=unchanged)", type="password", key=f"pw_{u['id']}")
-                            if st.form_submit_button("💾 Save"):
-                                upd = {"display_name": nd, "role": nr, "country": nc, "organisation": no, "can_read_patient_fb": np}
-                                if nw:
-                                    upd["password_hash"] = nw
-                                sb().table("app_users").update(upd).eq("id", u["id"]).execute()
-                                st.success(f"✅ {u['username']} updated!")
-                                st.rerun()
-                    st.markdown("---")
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-    with t2:
-        with st.form("new_user"):
-            un = st.text_input("Username")
-            pw = st.text_input("Password", type="password")
-            dn = st.text_input("Display Name")
-            rl = st.selectbox("Role", ["Partner", "Patient", "Admin"])
-            ct = st.selectbox("Country", ["Turkey", "Poland", "Spain", "N/A", "All"])
-            og = st.text_input("Organisation")
-            pf = st.checkbox("Patient FB Read", False)
-            if st.form_submit_button("➕ Add", type="primary"):
-                if not un or not pw or not dn:
-                    st.error("Username, password, and name required!")
-                else:
+    
+    try:
+        users = sb().table("app_users").select("*").execute().data or []
+        if users:
+            df = pd.DataFrame(users)
+            cols_show = [c for c in ["username","display_name","role","country","organisation","is_active","last_login"] if c in df.columns]
+            st.dataframe(df[cols_show], use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        st.markdown("### ➕ Add User")
+        with st.form("add_user"):
+            uc1, uc2 = st.columns(2)
+            with uc1:
+                nu = st.text_input("Username")
+                nn = st.text_input("Display Name")
+                np2 = st.text_input("Password", type="password")
+            with uc2:
+                nr = st.selectbox("Role", ["Admin", "Partner", "Patient"])
+                nc = st.selectbox("Country", ["Turkey", "Poland", "Spain", "All", "N/A"])
+                no = st.text_input("Organisation")
+            if st.form_submit_button("➕ Add User", type="primary"):
+                if nu and nn and np2:
                     try:
-                        ex = sb().table("app_users").select("id").eq("username", un.strip().lower()).execute()
-                        if ex.data:
-                            st.error("Username exists!")
-                        else:
-                            sb().table("app_users").insert({
-                                "username": un.strip().lower(), "password_hash": pw,
-                                "display_name": dn, "role": rl, "country": ct,
-                                "organisation": og, "is_active": True,
-                                "can_read_patient_fb": pf, "created_by": st.session_state.get("username", "admin"),
-                            }).execute()
-                            st.success(f"✅ '{un}' created!")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+                        sb().table("app_users").insert({
+                            "username": nu.lower(), "password_hash": np2,
+                            "display_name": nn, "role": nr, "country": nc,
+                            "organisation": no, "is_active": True
+                        }).execute()
+                        st.success(f"User '{nu}' created!"); st.rerun()
+                    except Exception as e: st.error(f"Error: {e}")
+    except Exception as e: st.error(f"Error: {e}")
 
 
-# ═══════════════════════════════════════════════════
-# MAIN
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════
+# SIDEBAR + MAIN
+# ═══════════════════════════════════════
+def render_sidebar():
+    with st.sidebar:
+        st.markdown(f"""
+        <div style='text-align:center;padding:1rem 0;'>
+            <div style='font-size:2.5rem;'>🧬</div>
+            <h2 style='color:#2ABFBF;margin:0.3rem 0;font-size:1.3rem;'>OncoConnect</h2>
+            <p style='color:#64748b;font-size:0.75rem;margin:0;'>Co-Creation Hub v4.0</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        r = get_role()
+        badge = ROLE_BADGES.get(r, r)
+        cn = get_country()
+        flag = FLAGS.get(cn, "🌍")
+        
+        st.markdown(f"""
+        <div style='background:rgba(42,191,191,0.1);border-radius:12px;padding:1rem;margin-bottom:1rem;'>
+            <p style='margin:0;color:#2ABFBF;font-weight:600;'>{get_name()}</p>
+            <p style='margin:0.2rem 0;color:#94a3b8;font-size:0.85rem;'>{badge}</p>
+            <p style='margin:0;color:#94a3b8;font-size:0.85rem;'>{flag} {cn} | {get_org()}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Navigation
+        pages = []
+        all_pages = ["Dashboard", "Work Packages", "Gantt Chart", "Partners", "Partner Feedback",
+                     "Patient Feedback", "Approval Status", "Announcements", "Documents", "Meetings",
+                     "🧠 AI Center", "Admin Panel", "User Management"]
+        
+        for p in all_pages:
+            if check_access(p, r): pages.append(p)
+        
+        page_icons = {"Dashboard": "📊", "Work Packages": "📦", "Gantt Chart": "📅", "Partners": "🤝",
+                     "Partner Feedback": "💬", "Patient Feedback": "💚", "Approval Status": "🗳️",
+                     "Announcements": "📢", "Documents": "📁", "Meetings": "📅",
+                     "🧠 AI Center": "🧠", "Admin Panel": "🛡️", "User Management": "👥"}
+        
+        page = st.radio("Navigation", pages, format_func=lambda x: f"{page_icons.get(x,'')} {x}", label_visibility="collapsed")
+        
+        st.markdown("---")
+        
+        # Quick status
+        ap = db_get_approvals()
+        an = sum(1 for v in ap.values() if v)
+        st.markdown(f"""
+        <div style='font-size:0.8rem;color:#94a3b8;'>
+            <p>🔗 DB: {'✅' if SUPABASE_OK else '⚠️'} | 🧠 AI: {'✅' if AI_ENABLED else '⚠️'}</p>
+            <p>🗳️ Approvals: {an}/3 | 📤 Export: {'✅' if EXPORT_OK else '⚠️'}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Next meeting quick view
+        meetings = db_get_meetings()
+        today_str = str(date.today())
+        upcoming = sorted([m for m in meetings if str(m.get("meeting_date","")) >= today_str], key=lambda x: str(x.get("meeting_date","")))
+        if upcoming:
+            nm = upcoming[0]
+            st.markdown(f"""
+            <div style='background:rgba(45,140,255,0.1);border-radius:10px;padding:0.8rem;margin-top:0.5rem;'>
+                <p style='margin:0;font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:1px;'>Next Meeting</p>
+                <p style='margin:0.2rem 0;color:#2D8CFF;font-weight:600;font-size:0.85rem;'>{nm.get("title","")[:30]}</p>
+                <p style='margin:0;color:#94a3b8;font-size:0.8rem;'>📅 {nm.get("meeting_date","")} 🕐 {str(nm.get("start_time",""))[:5]}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        if st.button("🚪 Logout", use_container_width=True): logout()
+        
+        st.markdown(f"<p style='text-align:center;font-size:0.7rem;color:#475569;margin-top:1rem;'>© 2025 OncoConnect<br>Erasmus+ KA210</p>", unsafe_allow_html=True)
+        
+        return page
+
+
 def main():
     init_session()
-    if not render_login():
-        return
-
-    wp_df, partners_df = load_static()
-    r = get_role()
-    c = get_country()
-
-    # Sidebar
-    st.sidebar.markdown("### 🧬 OncoConnect")
-    st.sidebar.caption("Erasmus+ KA210")
-    st.sidebar.write(f"**{get_name()}** ({ROLE_BADGES.get(r, r)})")
-    if r == "Partner":
-        st.sidebar.write(f"{FLAGS.get(c, '')} {get_org()}")
-        wps = get_user_wps(c)
-        leads = WP_COUNTRY_MAP.get(c, {}).get("lead", [])
-        st.sidebar.caption(f"WPs: {', '.join(wps)} | Lead: {', '.join(leads)}")
-    st.sidebar.divider()
-
-    if r == "Admin":
-        pages = ["Dashboard", "Work Packages", "Gantt Chart", "Partners",
-                 "Partner Feedback", "Patient Feedback", "Approval Status",
-                 "Announcements", "Documents", "🧠 AI Center", "Admin Panel", "User Management"]
-    elif r == "Partner":
-        pages = ["Dashboard", "Work Packages", "Gantt Chart", "Partners",
-                 "Partner Feedback", "Patient Feedback", "Approval Status",
-                 "Announcements", "Documents"]
-    else:
-        pages = ["Dashboard", "Partners", "Patient Feedback", "Announcements", "Documents"]
-
-    page = st.sidebar.radio("Navigation", pages)
-    st.sidebar.divider()
-    (st.sidebar.success if SUPABASE_OK else st.sidebar.warning)(f"DB: {'Connected' if SUPABASE_OK else 'Local'}")
-    if AI_ENABLED:
-        st.sidebar.success(f"AI: {'OpenRouter' if USE_OPENROUTER else 'OpenAI'}")
-    else:
-        st.sidebar.info("AI: Inactive")
-    if st.sidebar.button("🚪 Logout", use_container_width=True):
-        logout()
-
-    if not check_access(page, r):
-        show_access_denied()
-        return
-
-    if page == "Dashboard":
-        page_dashboard(wp_df, partners_df)
-    elif page == "Work Packages":
-        page_work_packages(wp_df)
-    elif page == "Gantt Chart":
-        page_gantt(wp_df)
-    elif page == "Partners":
-        page_partners(partners_df)
-    elif page == "Partner Feedback":
-        page_partner_feedback()
-    elif page == "Patient Feedback":
-        page_patient_feedback()
-    elif page == "Approval Status":
-        page_approval()
-    elif page == "Announcements":
-        page_announcements()
-    elif page == "Documents":
-        page_documents()
-    elif page == "🧠 AI Center":
-        page_ai_center()
-    elif page == "Admin Panel":
-        page_admin()
-    elif page == "User Management":
-        page_user_management()
+    if not render_login(): return
+    inject_pro_css()
+    
+    page = render_sidebar()
+    wp_df, pf = load_static()
+    
+    if page == "Dashboard": page_dashboard(wp_df, pf)
+    elif page == "Work Packages": page_work_packages(wp_df)
+    elif page == "Gantt Chart": page_gantt(wp_df)
+    elif page == "Partners": page_partners(pf)
+    elif page == "Partner Feedback": page_partner_feedback()
+    elif page == "Patient Feedback": page_patient_feedback()
+    elif page == "Approval Status": page_approval()
+    elif page == "Announcements": page_announcements()
+    elif page == "Documents": page_documents()
+    elif page == "Meetings": page_meetings()
+    elif page == "🧠 AI Center": page_ai_center()
+    elif page == "Admin Panel": page_admin()
+    elif page == "User Management": page_user_management()
 
 
 if __name__ == "__main__":
