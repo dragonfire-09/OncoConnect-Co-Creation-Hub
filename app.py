@@ -1288,16 +1288,44 @@ def page_dashboard(wp_df, pf):
         ch1, ch2 = st.columns(2)
         with ch1:
             if "budget_eur" in wp_df.columns:
-                fig = px.pie(wp_df, names="wp_id", values="budget_eur", color_discrete_sequence=px.colors.qualitative.Set2)
+                # wp_id sütunu var, wp_name'i label olarak kullan
+                label_col = "wp_name" if "wp_name" in wp_df.columns else "wp_id"
+                fig = px.pie(
+                    wp_df, names=label_col, values="budget_eur",
+                    title="Budget Distribution",
+                    color_discrete_sequence=px.colors.qualitative.Set2,
+                )
                 fig.update_traces(textposition="inside", textinfo="percent+label")
-                fig.update_layout(height=350)
+                fig.update_layout(height=400)
                 st.plotly_chart(fig, use_container_width=True)
         with ch2:
-            scc = wp_df["status"].value_counts().reset_index()
-            scc.columns = ["status", "count"]
-            fig2 = px.bar(scc, x="status", y="count", color="status")
-            fig2.update_layout(height=350, showlegend=False)
-            st.plotly_chart(fig2, use_container_width=True)
+            if "status" in wp_df.columns:
+                scc = wp_df["status"].value_counts().reset_index()
+                scc.columns = ["status", "count"]
+                fig2 = px.bar(
+                    scc, x="status", y="count", color="status",
+                    title="WP Status Overview",
+                    color_discrete_map={
+                        "Completed": "#10B981",
+                        "In Progress": "#3B82F6",
+                        "Not Started": "#94A3B8",
+                        "Planned": "#F59E0B",
+                    },
+                )
+                fig2.update_layout(height=400, showlegend=False)
+                st.plotly_chart(fig2, use_container_width=True)
+
+    # Budget summary
+    if len(wp_df) > 0 and "budget_eur" in wp_df.columns:
+        total_budget = wp_df["budget_eur"].sum()
+        st.markdown(
+            f"<div style='background:linear-gradient(135deg,#f0f9ff,#e0f2fe);border-radius:12px;"
+            f"padding:1rem 1.5rem;border:1px solid #bae6fd;margin:1rem 0;'>"
+            f"<strong>💰 Total Budget:</strong> €{total_budget:,.0f} / €{TOTAL_BUDGET:,.0f} "
+            f"({'✅ Within limit' if total_budget <= TOTAL_BUDGET else '⚠️ Over budget'})"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
     st.subheader("📢 Latest Announcements")
     for a in db_get_announcements()[:3]:
