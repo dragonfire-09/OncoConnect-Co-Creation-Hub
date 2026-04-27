@@ -1616,7 +1616,7 @@ def main():
     page = render_sidebar()
     wp_df, pf = load_static()
     
-    if page == "Dashboard":
+if page == "Dashboard":
     page_dashboard(wp_df, partners_df)
     elif page == "Work Packages": page_work_packages(wp_df)
     elif page == "Gantt Chart": page_gantt(wp_df)
