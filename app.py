@@ -1829,8 +1829,8 @@ def page_gantt(wp_df):
     r = get_role()
     c = get_country()
     st.markdown(
-        "<div class='pro-header'><h1>📅 Gantt Chart</h1>"
-        "<p>Project timeline visualization — 18-month implementation plan</p></div>",
+        "<div class='pro-header'><h1>📅 Interactive Gantt Chart</h1>"
+        "<p>Dynamic project timeline — zoom, filter, track progress</p></div>",
         unsafe_allow_html=True,
     )
     if len(wp_df) == 0:
@@ -1843,11 +1843,12 @@ def page_gantt(wp_df):
 
     df = wp_df.copy()
 
+    # Partner filtering
     if r == "Partner" and c != "All":
         wps = get_user_wps(c)
         df = df[df["wp_id"].isin(wps)]
-        st.info(f"Showing WPs for {FLAGS.get(c,'')} {c}")
 
+    # Convert months to dates
     try:
         df["start_date"] = df["start_month"].apply(
             lambda m: PROJECT_START + timedelta(days=(int(m) - 1) * 30)
@@ -1861,116 +1862,397 @@ def page_gantt(wp_df):
 
     label_col = "wp_name" if "wp_name" in df.columns else "wp_id"
     df["label"] = df["wp_id"] + ": " + df[label_col]
+    df["duration_months"] = df["end_month"].astype(int) - df["start_month"].astype(int) + 1
+
+    # Calculate progress for each WP
+    now = datetime.now()
+    progress_list = []
+    for _, row in df.iterrows():
+        sd = row["start_date"]
+        ed = row["end_date"]
+        if now < sd:
+            progress_list.append(0)
+        elif now > ed:
+            progress_list.append(100)
+        else:
+            total = (ed - sd).days
+            elapsed = (now - sd).days
+            progress_list.append(int((elapsed / max(total, 1)) * 100))
+    df["progress"] = progress_list
 
     if df.empty:
         st.warning("No data to display.")
         return
 
-    fig = px.timeline(
-        df,
-        x_start="start_date",
-        x_end="end_date",
-        y="label",
-        color="status",
-        color_discrete_map={
+    # ═══════════════════════════════════════
+    # INTERACTIVE CONTROLS
+    # ═══════════════════════════════════════
+    st.markdown("### 🎛️ Controls")
+    ctrl1, ctrl2, ctrl3, ctrl4 = st.columns(4)
+
+    with ctrl1:
+        view_mode = st.selectbox(
+            "📊 View",
+            ["Timeline", "Progress", "Budget", "Country Lead", "All-in-One"],
+            key="gantt_view",
+        )
+    with ctrl2:
+        status_filter = st.multiselect(
+            "🔖 Status",
+            df["status"].unique().tolist(),
+            default=df["status"].unique().tolist(),
+            key="gantt_status",
+        )
+    with ctrl3:
+        if "lead_country" in df.columns:
+            country_filter = st.multiselect(
+                "🌍 Country",
+                df["lead_country"].unique().tolist(),
+                default=df["lead_country"].unique().tolist(),
+                key="gantt_country",
+            )
+        else:
+            country_filter = []
+    with ctrl4:
+        show_milestones = st.checkbox("📍 Show Milestones", value=True, key="gantt_miles")
+
+    # Apply filters
+    filtered = df.copy()
+    if status_filter:
+        filtered = filtered[filtered["status"].isin(status_filter)]
+    if country_filter and "lead_country" in filtered.columns:
+        filtered = filtered[filtered["lead_country"].isin(country_filter)]
+
+    if filtered.empty:
+        st.warning("No WPs match the selected filters.")
+        return
+
+    # ═══════════════════════════════════════
+    # VIEW 1: TIMELINE (Default Gantt)
+    # ═══════════════════════════════════════
+    if view_mode in ("Timeline", "All-in-One"):
+        st.markdown("### 📅 Project Timeline")
+
+        fig = go.Figure()
+
+        status_colors = {
             "Completed": "#10B981",
             "In Progress": "#3B82F6",
             "Not Started": "#94A3B8",
             "Planned": "#F59E0B",
-        },
-        hover_data=["lead_country", "budget_eur"],
-    )
-    fig.update_yaxes(autorange="reversed")
-    fig.update_layout(
-        height=max(350, len(df) * 70),
-        title="Project Implementation Timeline",
-        xaxis_title="",
-        yaxis_title="",
-        font=dict(size=12),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1,
-        ),
-    )
+        }
 
-    # ── Bugün çizgisi (annotation OLMADAN shape olarak) ──
-    now = datetime.now()
-    fig.add_shape(
-        type="line",
-        x0=now, x1=now,
-        y0=0, y1=1,
-        yref="paper",
-        line=dict(color="red", width=2, dash="dash"),
-    )
-    fig.add_annotation(
-        x=now, y=1.05, yref="paper",
-        text="📍 Today",
-        showarrow=False,
-        font=dict(color="red", size=11, family="Inter"),
-    )
+        for idx, row in filtered.iterrows():
+            color = status_colors.get(row["status"], "#64748b")
+            prog = row["progress"]
 
-    # ── Project Start çizgisi ──
-    fig.add_shape(
-        type="line",
-        x0=PROJECT_START, x1=PROJECT_START,
-        y0=0, y1=1,
-        yref="paper",
-        line=dict(color="#2ABFBF", width=1.5, dash="dot"),
-    )
-    fig.add_annotation(
-        x=PROJECT_START, y=-0.08, yref="paper",
-        text="Project Start",
-        showarrow=False,
-        font=dict(color="#2ABFBF", size=10),
-    )
+            # Full bar (background)
+            fig.add_trace(go.Bar(
+                x=[(row["end_date"] - row["start_date"]).days],
+                y=[row["label"]],
+                base=[row["start_date"]],
+                orientation="h",
+                marker=dict(
+                    color=color,
+                    opacity=0.3,
+                    line=dict(width=1, color=color),
+                ),
+                hovertemplate=(
+                    f"<b>{row['label']}</b><br>"
+                    f"Lead: {row.get('lead_country', 'N/A')}<br>"
+                    f"Period: M{row['start_month']}–M{row['end_month']} "
+                    f"({row['duration_months']} months)<br>"
+                    f"Budget: €{row.get('budget_eur', 0):,.0f}<br>"
+                    f"Status: {row['status']}<br>"
+                    f"Progress: {prog}%<br>"
+                    f"<extra></extra>"
+                ),
+                showlegend=False,
+                name=row["wp_id"],
+            ))
 
-    # ── Project End çizgisi ──
-    project_end = PROJECT_START + timedelta(days=18 * 30)
-    fig.add_shape(
-        type="line",
-        x0=project_end, x1=project_end,
-        y0=0, y1=1,
-        yref="paper",
-        line=dict(color="#dc3545", width=1.5, dash="dot"),
-    )
-    fig.add_annotation(
-        x=project_end, y=-0.08, yref="paper",
-        text="Project End",
-        showarrow=False,
-        font=dict(color="#dc3545", size=10),
-    )
+            # Progress bar (foreground)
+            if prog > 0:
+                total_days = (row["end_date"] - row["start_date"]).days
+                prog_days = int(total_days * prog / 100)
+                fig.add_trace(go.Bar(
+                    x=[prog_days],
+                    y=[row["label"]],
+                    base=[row["start_date"]],
+                    orientation="h",
+                    marker=dict(color=color, opacity=0.85),
+                    showlegend=False,
+                    hoverinfo="skip",
+                ))
 
-    st.plotly_chart(fig, use_container_width=True)
+            # Progress text
+            mid_date = row["start_date"] + timedelta(
+                days=(row["end_date"] - row["start_date"]).days // 2
+            )
+            fig.add_annotation(
+                x=mid_date,
+                y=row["label"],
+                text=f"{prog}%",
+                showarrow=False,
+                font=dict(color="white" if prog > 30 else "#333", size=11, family="Inter"),
+            )
 
-    # ── Timeline Details Table ──
-    st.markdown("### 📋 Timeline Details")
-    timeline_data = []
-    for _, row in df.iterrows():
-        timeline_data.append({
-            "WP": row.get("wp_id", ""),
-            "Name": row.get("wp_name", row.get("title", "")),
-            "Lead": row.get("lead_country", ""),
-            "Start": f"M{row.get('start_month', '')} ({row['start_date'].strftime('%b %Y')})",
-            "End": f"M{row.get('end_month', '')} ({row['end_date'].strftime('%b %Y')})",
-            "Duration": f"{int(row.get('end_month', 0)) - int(row.get('start_month', 0)) + 1} months",
-            "Status": row.get("status", ""),
-            "Budget": f"€{row.get('budget_eur', 0):,.0f}",
-        })
-    st.dataframe(pd.DataFrame(timeline_data), use_container_width=True, hide_index=True)
+        # Today marker
+        fig.add_shape(
+            type="line",
+            x0=now, x1=now,
+            y0=-0.5, y1=len(filtered) - 0.5,
+            line=dict(color="#EF4444", width=2.5, dash="dash"),
+        )
+        fig.add_annotation(
+            x=now, y=len(filtered) - 0.3,
+            text="📍 TODAY",
+            showarrow=True,
+            arrowhead=2,
+            arrowcolor="#EF4444",
+            font=dict(color="#EF4444", size=11, family="Inter, sans-serif"),
+            bgcolor="white",
+            bordercolor="#EF4444",
+            borderwidth=1,
+            borderpad=4,
+            ax=0, ay=-30,
+        )
 
-    # ── Monthly Activity Heatmap ──
-    st.markdown("### 📊 Monthly Activity Overview")
+        if show_milestones:
+            # Project Start
+            fig.add_shape(
+                type="line",
+                x0=PROJECT_START, x1=PROJECT_START,
+                y0=-0.5, y1=len(filtered) - 0.5,
+                line=dict(color="#2ABFBF", width=1.5, dash="dot"),
+            )
+            fig.add_annotation(
+                x=PROJECT_START, y=-0.7,
+                text="🚀 Start", showarrow=False,
+                font=dict(color="#2ABFBF", size=10),
+            )
+
+            # Project End
+            project_end = PROJECT_START + timedelta(days=18 * 30)
+            fig.add_shape(
+                type="line",
+                x0=project_end, x1=project_end,
+                y0=-0.5, y1=len(filtered) - 0.5,
+                line=dict(color="#dc3545", width=1.5, dash="dot"),
+            )
+            fig.add_annotation(
+                x=project_end, y=-0.7,
+                text="🏁 End", showarrow=False,
+                font=dict(color="#dc3545", size=10),
+            )
+
+            # Mid-term review (M9)
+            mid_review = PROJECT_START + timedelta(days=9 * 30)
+            fig.add_shape(
+                type="line",
+                x0=mid_review, x1=mid_review,
+                y0=-0.5, y1=len(filtered) - 0.5,
+                line=dict(color="#F59E0B", width=1, dash="dashdot"),
+            )
+            fig.add_annotation(
+                x=mid_review, y=-0.7,
+                text="📋 Mid-Review", showarrow=False,
+                font=dict(color="#F59E0B", size=9),
+            )
+
+        fig.update_layout(
+            height=max(400, len(filtered) * 80 + 100),
+            barmode="overlay",
+            xaxis=dict(
+                title="",
+                type="date",
+                tickformat="%b %Y",
+                dtick="M1",
+                tickangle=45,
+                gridcolor="#f0f0f0",
+                range=[
+                    PROJECT_START - timedelta(days=15),
+                    PROJECT_START + timedelta(days=18 * 30 + 30),
+                ],
+                rangeslider=dict(visible=True, thickness=0.05),
+            ),
+            yaxis=dict(title="", autorange="reversed"),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            font=dict(family="Inter, sans-serif"),
+            margin=dict(l=10, r=10, t=40, b=80),
+            dragmode="zoom",
+        )
+
+        config = {
+            "displayModeBar": True,
+            "modeBarButtonsToAdd": ["drawline", "eraseshape"],
+            "scrollZoom": True,
+            "displaylogo": False,
+        }
+        st.plotly_chart(fig, use_container_width=True, config=config)
+
+    # ═══════════════════════════════════════
+    # VIEW 2: PROGRESS TRACKER
+    # ═══════════════════════════════════════
+    if view_mode in ("Progress", "All-in-One"):
+        st.markdown("### 📈 Progress Tracker")
+
+        prog_cols = st.columns(len(filtered))
+        for col_p, (_, row) in zip(prog_cols, filtered.iterrows()):
+            with col_p:
+                prog = row["progress"]
+                if prog >= 100:
+                    color = "#10B981"
+                    emoji = "✅"
+                elif prog >= 50:
+                    color = "#3B82F6"
+                    emoji = "🔄"
+                elif prog > 0:
+                    color = "#F59E0B"
+                    emoji = "🔶"
+                else:
+                    color = "#94A3B8"
+                    emoji = "⏳"
+
+                st.markdown(
+                    f"<div style='text-align:center;padding:1rem;background:white;"
+                    f"border-radius:12px;border:1px solid #e8ecf1;"
+                    f"box-shadow:0 2px 8px rgba(0,0,0,0.04);'>"
+                    f"<div style='font-size:1.5rem;'>{emoji}</div>"
+                    f"<div style='font-weight:700;color:#1B3A5C;font-size:0.9rem;'>{row['wp_id']}</div>"
+                    f"<div style='font-size:0.75rem;color:#64748b;margin:0.3rem 0;'>"
+                    f"{row.get('wp_name', '')[:20]}</div>"
+                    f"<div style='background:#e2e8f0;border-radius:10px;height:12px;"
+                    f"margin:0.5rem 0;overflow:hidden;'>"
+                    f"<div style='background:{color};height:100%;width:{prog}%;"
+                    f"border-radius:10px;transition:width 0.5s;'></div></div>"
+                    f"<div style='font-size:1.3rem;font-weight:800;color:{color};'>{prog}%</div>"
+                    f"<div style='font-size:0.7rem;color:#94a3b8;'>{row['status']}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+        # Overall progress
+        avg_prog = int(filtered["progress"].mean())
+        st.markdown(
+            f"<div style='background:linear-gradient(135deg,#1B3A5C,#2d5a8e);border-radius:16px;"
+            f"padding:1.5rem;color:white;text-align:center;margin:1rem 0;'>"
+            f"<p style='margin:0;font-size:0.8rem;opacity:0.7;letter-spacing:1px;'>OVERALL PROJECT PROGRESS</p>"
+            f"<div style='background:rgba(255,255,255,0.2);border-radius:10px;height:20px;"
+            f"margin:1rem 2rem;overflow:hidden;'>"
+            f"<div style='background:#2ABFBF;height:100%;width:{avg_prog}%;border-radius:10px;"
+            f"transition:width 0.5s;'></div></div>"
+            f"<p style='margin:0;font-size:2rem;font-weight:800;'>{avg_prog}%</p></div>",
+            unsafe_allow_html=True,
+        )
+
+    # ═══════════════════════════════════════
+    # VIEW 3: BUDGET TIMELINE
+    # ═══════════════════════════════════════
+    if view_mode in ("Budget", "All-in-One"):
+        st.markdown("### 💰 Budget Distribution Timeline")
+
+        fig_b = px.timeline(
+            filtered,
+            x_start="start_date",
+            x_end="end_date",
+            y="label",
+            color="budget_eur",
+            color_continuous_scale="Viridis",
+            hover_data=["lead_country", "status", "budget_eur", "duration_months"],
+        )
+        fig_b.update_yaxes(autorange="reversed")
+        fig_b.update_layout(
+            height=max(350, len(filtered) * 65),
+            coloraxis_colorbar=dict(title="Budget €"),
+            xaxis=dict(tickformat="%b %Y", dtick="M1", tickangle=45),
+            plot_bgcolor="white",
+        )
+        st.plotly_chart(fig_b, use_container_width=True)
+
+        # Budget bar chart
+        fig_bar = px.bar(
+            filtered, x="wp_id", y="budget_eur", color="lead_country",
+            text="budget_eur", title="Budget per WP",
+            color_discrete_map={
+                "Turkey": "#E30A17", "Poland": "#DC143C", "Spain": "#F4B400",
+            },
+        )
+        fig_bar.update_traces(texttemplate="€%{text:,.0f}", textposition="outside")
+        fig_bar.update_layout(height=350, yaxis_title="EUR", xaxis_title="")
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    # ═══════════════════════════════════════
+    # VIEW 4: COUNTRY LEAD VIEW
+    # ═══════════════════════════════════════
+    if view_mode in ("Country Lead", "All-in-One"):
+        st.markdown("### 🌍 Country Lead Overview")
+
+        if "lead_country" in filtered.columns:
+            fig_c = px.timeline(
+                filtered,
+                x_start="start_date",
+                x_end="end_date",
+                y="label",
+                color="lead_country",
+                color_discrete_map={
+                    "Turkey": "#E30A17",
+                    "Poland": "#DC143C",
+                    "Spain": "#F4B400",
+                },
+                hover_data=["status", "budget_eur"],
+            )
+            fig_c.update_yaxes(autorange="reversed")
+            fig_c.update_layout(
+                height=max(350, len(filtered) * 65),
+                xaxis=dict(tickformat="%b %Y", dtick="M1", tickangle=45),
+                plot_bgcolor="white",
+            )
+
+            # Today
+            fig_c.add_shape(
+                type="line",
+                x0=now, x1=now,
+                y0=-0.5, y1=len(filtered) - 0.5,
+                line=dict(color="#EF4444", width=2, dash="dash"),
+            )
+
+            st.plotly_chart(fig_c, use_container_width=True)
+
+            # Country summary cards
+            cc = st.columns(3)
+            for col_cc, cn in zip(cc, ["Turkey", "Poland", "Spain"]):
+                with col_cc:
+                    cn_wps = filtered[filtered["lead_country"] == cn]
+                    cn_budget = cn_wps["budget_eur"].sum() if len(cn_wps) > 0 else 0
+                    cn_count = len(cn_wps)
+                    st.markdown(
+                        f"<div style='background:white;border-radius:12px;padding:1.2rem;"
+                        f"text-align:center;border:1px solid #e8ecf1;'>"
+                        f"<div style='font-size:2rem;'>{FLAGS.get(cn, '🌍')}</div>"
+                        f"<div style='font-weight:700;color:#1B3A5C;'>{cn}</div>"
+                        f"<div style='color:#2ABFBF;font-size:1.3rem;font-weight:800;'>"
+                        f"€{cn_budget:,.0f}</div>"
+                        f"<div style='color:#94a3b8;font-size:0.85rem;'>{cn_count} WP(s) lead</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+    # ═══════════════════════════════════════
+    # MONTHLY HEATMAP (always shown)
+    # ═══════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### 📊 Monthly Activity Heatmap")
+
     months = list(range(1, 19))
     month_labels = []
     for m in months:
         d = PROJECT_START + timedelta(days=(m - 1) * 30)
-        month_labels.append(d.strftime("%b %y"))
+        month_labels.append(f"M{m}\n{d.strftime('%b %y')}")
 
     heatmap_data = []
-    for _, row in df.iterrows():
+    for _, row in filtered.iterrows():
         sm = int(row.get("start_month", 1))
         em = int(row.get("end_month", 18))
         for m in months:
@@ -1982,15 +2264,79 @@ def page_gantt(wp_df):
             })
 
     hm_df = pd.DataFrame(heatmap_data)
-    fig2 = px.imshow(
-        hm_df.pivot(index="WP", columns="Month", values="Active"),
-        color_continuous_scale=["#f1f5f9", "#2ABFBF"],
-        aspect="auto",
-        title="WP Activity per Month",
+    pivot = hm_df.pivot(index="WP", columns="Month", values="Active")
+
+    # Sort columns properly
+    sorted_cols = [f"M{i}" for i in range(1, 19)]
+    pivot = pivot[[c2 for c2 in sorted_cols if c2 in pivot.columns]]
+
+    fig_hm = go.Figure(data=go.Heatmap(
+        z=pivot.values,
+        x=pivot.columns,
+        y=pivot.index,
+        colorscale=[[0, "#f1f5f9"], [1, "#2ABFBF"]],
+        showscale=False,
+        hovertemplate="<b>%{y}</b><br>%{x}<br>Active: %{z}<extra></extra>",
+    ))
+
+    # Current month marker
+    elapsed_months = max(1, min(18, ((now - PROJECT_START).days // 30) + 1))
+    fig_hm.add_shape(
+        type="rect",
+        x0=elapsed_months - 1.5, x1=elapsed_months - 0.5,
+        y0=-0.5, y1=len(pivot) - 0.5,
+        line=dict(color="#EF4444", width=2),
+        fillcolor="rgba(239,68,68,0.1)",
     )
-    fig2.update_layout(height=300, coloraxis_showscale=False)
-    fig2.update_xaxes(tickangle=45)
-    st.plotly_chart(fig2, use_container_width=True)
+
+    fig_hm.update_layout(
+        height=max(250, len(filtered) * 45 + 80),
+        xaxis=dict(title="", tickangle=0, side="top"),
+        yaxis=dict(title="", autorange="reversed"),
+        plot_bgcolor="white",
+        margin=dict(l=10, r=10, t=40, b=20),
+    )
+    st.plotly_chart(fig_hm, use_container_width=True)
+
+    # ═══════════════════════════════════════
+    # TIMELINE DETAILS TABLE
+    # ═══════════════════════════════════════
+    st.markdown("### 📋 Timeline Details")
+    timeline_data = []
+    for _, row in filtered.iterrows():
+        prog = row["progress"]
+        if prog >= 100:
+            prog_icon = "✅"
+        elif prog >= 50:
+            prog_icon = "🔄"
+        elif prog > 0:
+            prog_icon = "🔶"
+        else:
+            prog_icon = "⏳"
+
+        timeline_data.append({
+            "": prog_icon,
+            "WP": row.get("wp_id", ""),
+            "Name": row.get("wp_name", ""),
+            "Lead": f"{FLAGS.get(row.get('lead_country', ''), '🌍')} {row.get('lead_country', '')}",
+            "Start": f"M{row.get('start_month', '')} ({row['start_date'].strftime('%b %Y')})",
+            "End": f"M{row.get('end_month', '')} ({row['end_date'].strftime('%b %Y')})",
+            "Duration": f"{row['duration_months']} mo",
+            "Progress": f"{prog}%",
+            "Status": row.get("status", ""),
+            "Budget": f"€{row.get('budget_eur', 0):,.0f}",
+        })
+    st.dataframe(
+        pd.DataFrame(timeline_data),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Progress": st.column_config.ProgressColumn(
+                "Progress", min_value=0, max_value=100,
+                format="%d%%",
+            ),
+        },
+    )
 
 # ═══════════════════════════════════════
 # PAGE: PARTNERS
