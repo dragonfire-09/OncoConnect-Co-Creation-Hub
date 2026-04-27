@@ -1708,26 +1708,118 @@ def page_work_packages(wp_df):
     if len(wp_df) == 0:
         st.info("No WP data. Create data/work_packages.csv")
         return
+
+    # Filter for partner role
     if r == "Partner" and c != "All":
         wps = get_user_wps(c)
         wp_df = wp_df[wp_df["wp_id"].isin(wps)]
         st.info(f"Showing WPs for {FLAGS.get(c,'')} {c}: {', '.join(wps)}")
+
+    # Summary metrics
+    total_budget = wp_df["budget_eur"].sum() if "budget_eur" in wp_df.columns else 0
+    in_progress = len(wp_df[wp_df["status"] == "In Progress"]) if "status" in wp_df.columns else 0
+    not_started = len(wp_df[wp_df["status"] == "Not Started"]) if "status" in wp_df.columns else 0
+
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    with mc1:
+        st.markdown(f"<div class='metric-card'><div class='value'>{len(wp_df)}</div><div class='label'>Work Packages</div></div>", unsafe_allow_html=True)
+    with mc2:
+        st.markdown(f"<div class='metric-card'><div class='value'>€{total_budget:,.0f}</div><div class='label'>Total Budget</div></div>", unsafe_allow_html=True)
+    with mc3:
+        st.markdown(f"<div class='metric-card'><div class='value'>{in_progress}</div><div class='label'>In Progress</div></div>", unsafe_allow_html=True)
+    with mc4:
+        st.markdown(f"<div class='metric-card'><div class='value'>{not_started}</div><div class='label'>Not Started</div></div>", unsafe_allow_html=True)
+
+    st.markdown("")
+
     for _, row in wp_df.iterrows():
         wpid = row.get("wp_id", "")
-        with st.expander(f"📦 {wpid}: {row.get('title', '')}", expanded=False):
-            mc1, mc2, mc3 = st.columns(3)
-            with mc1:
-                st.metric("Budget", f"€{row.get('budget_eur', 0):,.0f}")
-            with mc2:
-                st.metric("Status", row.get("status", "Planned"))
-            with mc3:
-                st.metric("Lead", row.get("lead_country", "TBD"))
+        wp_name = row.get("wp_name", row.get("title", "Untitled"))
+        lead = row.get("lead_partner", row.get("lead_country", "TBD"))
+        lead_country = row.get("lead_country", "TBD")
+        status = row.get("status", "Planned")
+        budget = row.get("budget_eur", 0)
+        start_m = row.get("start_month", "")
+        end_m = row.get("end_month", "")
+        desc = row.get("description", "N/A")
+        deliverables = row.get("deliverables", "")
+        supporting = row.get("supporting_partners", "")
+
+        # Status color
+        status_colors = {
+            "Completed": "badge-success",
+            "In Progress": "badge-info",
+            "Not Started": "badge-warning",
+            "Planned": "badge-purple" if "badge-purple" in "" else "badge-warning",
+        }
+        status_badge = status_colors.get(status, "badge-info")
+
+        # Calculate actual dates from months
+        if start_m and end_m:
+            try:
+                s_date = PROJECT_START + timedelta(days=(int(start_m) - 1) * 30)
+                e_date = PROJECT_START + timedelta(days=int(end_m) * 30)
+                date_str = f"{s_date.strftime('%b %Y')} → {e_date.strftime('%b %Y')} (M{start_m}–M{end_m})"
+            except Exception:
+                date_str = f"M{start_m} – M{end_m}"
+        else:
+            date_str = "TBD"
+
+        with st.expander(f"📦 {wpid}: {wp_name}", expanded=False):
+            # Top metrics
+            tc1, tc2, tc3, tc4 = st.columns(4)
+            with tc1:
+                st.metric("Budget", f"€{budget:,.0f}")
+            with tc2:
+                st.metric("Status", status)
+            with tc3:
+                st.metric("Lead", lead_country)
+            with tc4:
+                st.metric("Timeline", f"M{start_m}–M{end_m}")
+
+            st.markdown(f"**📅 Period:** {date_str}")
+            st.markdown(f"**🏢 Lead Organisation:** {lead}")
+
+            # Supporting partners
+            if supporting:
+                sup_list = supporting.split(";")
+                st.markdown(f"**🤝 Supporting:** {', '.join(sup_list)}")
+
+            # Country roles
             if r != "Patient":
+                st.markdown("**🌍 Country Roles:**")
                 rc = st.columns(3)
                 for col2, cn in zip(rc, ["Turkey", "Poland", "Spain"]):
                     with col2:
                         st.markdown(f"{FLAGS[cn]} **{cn}**: {get_wp_role(cn, wpid)}")
-            st.markdown(f"**Description:** {row.get('description', 'N/A')}")
+
+            st.markdown(f"**📝 Description:** {desc}")
+
+            # Deliverables
+            if deliverables:
+                st.markdown("**📦 Deliverables:**")
+                for d in deliverables.split(";"):
+                    d = d.strip()
+                    if d:
+                        st.markdown(f"  - 📄 {d}")
+
+    # Budget overview chart
+    if "budget_eur" in wp_df.columns:
+        st.markdown("---")
+        st.subheader("💰 Budget Overview")
+        label_col = "wp_name" if "wp_name" in wp_df.columns else "wp_id"
+        fig = px.bar(
+            wp_df, x="wp_id", y="budget_eur", color="status",
+            text="budget_eur", hover_data=[label_col],
+            color_discrete_map={
+                "Completed": "#10B981",
+                "In Progress": "#3B82F6",
+                "Not Started": "#94A3B8",
+            },
+        )
+        fig.update_traces(texttemplate="€%{text:,.0f}", textposition="outside")
+        fig.update_layout(height=400, yaxis_title="Budget (EUR)", xaxis_title="")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 # ═══════════════════════════════════════
