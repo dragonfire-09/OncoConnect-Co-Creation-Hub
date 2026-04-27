@@ -1920,7 +1920,7 @@ def page_approval():
             ic = "✅" if approved else "⏳"
             st.markdown(
                 f"<div style='background:{bg};border-radius:16px;padding:2rem;text-align:center;"
-                f"border:1px solid {\"#bbf7d0\" if approved else \"#fde68a\"};'>"
+                border_color = "#bbf7d0" if approved else "#fde68a"
                 f"<div style='font-size:3rem;'>{FLAGS[cn]}</div>"
                 f"<h3 style='margin:0.5rem 0;'>{PARTNER_MAP[cn]}</h3>"
                 f"<div style='font-size:2rem;'>{ic}</div>"
