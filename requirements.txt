@@ -1,7 +1,7 @@
-streamlit==1.45.0
-supabase==2.15.2
-pandas==2.2.3
-plotly==6.0.1
-openai==1.78.1
-openpyxl==3.1.5
-fpdf2==2.8.3
+streamlit
+supabase
+pandas
+plotly
+openai
+openpyxl
+fpdf2
